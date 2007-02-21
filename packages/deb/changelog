@@ -1,3 +1,9 @@
+libcoredumper (1.1-1) unstable; urgency=low
+
+  * Upgraded to version 1.1.
+
+ -- Google Inc. <opensource@google.com>  Tue, 20 Feb 2007 15:07:03 -0800
+
 libcoredumper (1.0-1) unstable; urgency=low
 
   * Upgraded to version 1.0.

@@ -39,15 +39,24 @@ Thu Aug 10 12:44:40 2006  Google Inc. <opensource@google.com>
 	* the unittest can now be run even if the systems locale is not
 	English.
 
-Wed Feb 14 14:44:40 2007  Google Inc. <opensource.google.com>
+Wed Feb 14 14:44:40 2007  Google Inc. <opensource@google.com>
 
 	* fixed some packaging problems with newer versions of RPM
 	* added assembly version of sys_clone() in order to work around
 	buggy implementations in glibc.
 
-Thu Feb 15 16:24:32 2007  Google Inc. <opensource.google.com>
+Thu Feb 15 16:24:32 2007  Google Inc. <opensource@google.com>
 
 	* coredumper: version 1.0 release
 	* made devel RPMs depend on the runtime-only package.
 	* fixed signal related system calls on x86_64.
 	* wrote manual pages.
+
+Tue Feb 20 15:07:03 2007  Google Inc. <opensource@google.com>
+
+	* changed from NT_PRFPXREG to NT_PRXFPREG, as this appears to be
+	what the kernel and the binary tool chain finally agrees on.
+
+	* dump anonymous executable mappins such as the [vdso] segment.
+	This helps "gdb" in following call chains past the invocation of
+	signal handlers.

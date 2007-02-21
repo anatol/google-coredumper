@@ -130,8 +130,8 @@ struct stat64;
 #define O_DIRECTORY             0200000
 #endif
 #endif
-#ifndef NT_PRFPXREG
-#define NT_PRFPXREG             20
+#ifndef NT_PRXFPREG
+#define NT_PRXFPREG             0x46e62b7f
 #endif
 #ifndef PTRACE_GETFPXREGS
 #define PTRACE_GETFPXREGS       ((enum __ptrace_request)18)

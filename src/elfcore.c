@@ -566,6 +566,8 @@ static int CreateElfCore(void *handle,
 
     /* Read all mappings. This requires re-opening "/proc/self/maps"         */
     /* scope */ {
+      static const int PF_ANONYMOUS = 0x80000000;
+      static const int PF_MASK      = 0x00000007;
       struct {
         size_t start_address, end_address, offset;
         int   flags;
@@ -580,7 +582,7 @@ static int CreateElfCore(void *handle,
         for (i = 0; i < num_mappings;) {
           static const char * const dev_zero = "/dev/zero";
           const char *dev = dev_zero;
-          int    j, is_device;
+          int    j, is_device, is_anonymous;
           size_t zeros;
 
           memset(&mappings[i], 0, sizeof(mappings[i]));
@@ -596,10 +598,6 @@ static int CreateElfCore(void *handle,
               goto read_error;
             mappings[i].flags = (mappings[i].flags << 1) | (ch != '-');
           }
-          /* Drop the private/shared bit. This makes the flags compatible with
-           * the ELF access bits
-           */
-          mappings[i].flags >>= 1;
 
           /* Read offset                                                     */
           if ((ch = GetHex(&io, &mappings[i].offset)) != ' ')
@@ -623,12 +621,21 @@ static int CreateElfCore(void *handle,
           }
 
           /* Check whether this is a mapping for a device                    */
+          is_anonymous = (ch == '\n' || ch == '[');
           while (*dev && ch == *dev) {
             ch = GetChar(&io);
             dev++;
           }
           is_device = dev >= dev_zero + 5 &&
                       ((ch != '\n' && ch != ' ') || *dev != '\000');
+
+          /* Drop the private/shared bit. This makes the flags compatible with
+           * the ELF access bits
+           */
+          mappings[i].flags    = (mappings[i].flags >> 1) & PF_MASK;
+          if (is_anonymous) {
+            mappings[i].flags |= PF_ANONYMOUS;
+          }
 
           /* Skip until end of line                                          */
           while (ch != '\n') {
@@ -696,7 +703,7 @@ static int CreateElfCore(void *handle,
           #if defined(__i386__) && !defined(__x86_64__)
           if (fpxregs) {
             filesz       += num_threads*(
-                             sizeof(Nhdr) + 4 + sizeof(struct fpxregs));
+                             sizeof(Nhdr) + 8 + sizeof(struct fpxregs));
           }
           #endif
           memset(&phdr, 0, sizeof(Phdr));
@@ -723,10 +730,11 @@ static int CreateElfCore(void *handle,
             phdr.p_memsz  = filesz;
 
             /* Do not write contents for memory segments that are read-only  */
-            if ((mappings[i].flags & PF_W) == 0)
+            if ((mappings[i].flags & (PF_ANONYMOUS|PF_W)) == 0) {
               filesz      = 0;
+            }
             phdr.p_filesz = filesz;
-            phdr.p_flags  = mappings[i].flags;
+            phdr.p_flags  = mappings[i].flags & PF_MASK;
             if (writer(handle, &phdr, sizeof(Phdr)) != sizeof(Phdr)) {
               goto done;
             }
@@ -781,14 +789,16 @@ static int CreateElfCore(void *handle,
             #if defined(__i386__) && !defined( __x86_64__)
             /* Linux on x86-64 stores all FPU registers in the SSE structure */
             if (fpxregs) {
+              nhdr.n_namesz = 8;
               nhdr.n_descsz = sizeof(struct fpxregs);
-              nhdr.n_type   = NT_PRFPXREG;
+              nhdr.n_type   = NT_PRXFPREG;
               if (writer(handle, &nhdr, sizeof(Nhdr)) != sizeof(Nhdr) ||
-                  writer(handle, "CORE", 4) != 4 ||
+                  writer(handle, "LINUX\000\000", 8) != 8 ||
                   writer(handle, fpxregs+1, sizeof(struct fpxregs)) !=
                   sizeof(struct fpxregs)) {
                 goto done;
               }
+              nhdr.n_namesz = 4;
             }
             #endif
           }
@@ -805,7 +815,7 @@ static int CreateElfCore(void *handle,
 
         /* Write all memory segments                                         */
         for (i = 0; i < num_mappings; i++) {
-          if (mappings[i].flags & PF_W &&
+          if (mappings[i].flags & (PF_ANONYMOUS|PF_W) &&
               writer(handle, (void *)mappings[i].start_address,
                      mappings[i].end_address - mappings[i].start_address) !=
                      mappings[i].end_address - mappings[i].start_address) {
