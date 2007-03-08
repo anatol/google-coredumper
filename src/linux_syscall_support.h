@@ -193,7 +193,9 @@ struct stat64;
 #ifndef __NR_unlinkat
 #define __NR_unlinkat           301
 #endif
-
+#ifndef __NR_move_pages
+#define __NR_move_pages         317
+#endif
 /* End of i386 definitions                                                   */
 #elif defined(__ARM_ARCH_3__)
 #ifndef __NR_ugetrlimit
@@ -227,6 +229,9 @@ struct stat64;
 #ifndef __NR_set_tid_address
 #define __NR_set_tid_address    (__NR_SYSCALL_BASE + 256)
 #endif
+#ifndef __NR_move_pages
+#define __NR_move_pages         (__NR_SYSCALL_BASE + 344)
+#endif
 /* End of ARM 3 definitions                                                  */
 #elif defined(__x86_64__)
 #ifndef __NR_getdents64
@@ -257,6 +262,9 @@ struct stat64;
 #endif
 #ifndef __NR_unlinkat
 #define __NR_unlinkat           263
+#endif
+#ifndef __NR_move_pages
+#define __NR_move_pages         279
 #endif
 /* End of x86-64 definitions                                                 */
 #endif
@@ -817,6 +825,9 @@ struct stat64;
                        off_t,          o, int,    w)
   LSS_INLINE _syscall2(int,     munmap,          void*,       s,
                        size_t,         l)
+  LSS_INLINE _syscall6(long,    move_pages,      pid_t,       p,
+                       unsigned long,  n, void **,g, int *, d,
+                       int *,          s, int,    f)
   LSS_INLINE _syscall4(void*,   mremap,          void*,       o,
                        size_t,         os,       size_t,      ns,
                        unsigned long,  f)
