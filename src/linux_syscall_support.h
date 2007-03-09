@@ -151,6 +151,9 @@ struct stat64;
 #ifndef AT_REMOVEDIR
 #define AT_REMOVEDIR            0x200
 #endif
+#ifndef MREMAP_FIXED
+#define MREMAP_FIXED            2
+#endif
 
 #if defined(__i386__)
 #ifndef __NR_ugetrlimit
@@ -789,6 +792,7 @@ struct stat64;
   #endif
   #define __NR__exit   __NR_exit
   #define __NR__gettid __NR_gettid
+  #define __NR__mremap __NR_mremap
   LSS_INLINE _syscall1(int,     chdir,           const char *,p)
   LSS_INLINE _syscall1(int,     close,           int,         f)
   LSS_INLINE _syscall1(int,     dup,             int,         f)
@@ -828,9 +832,9 @@ struct stat64;
   LSS_INLINE _syscall6(long,    move_pages,      pid_t,       p,
                        unsigned long,  n, void **,g, int *, d,
                        int *,          s, int,    f)
-  LSS_INLINE _syscall4(void*,   mremap,          void*,       o,
+  LSS_INLINE _syscall5(void*,   _mremap,         void*,       o,
                        size_t,         os,       size_t,      ns,
-                       unsigned long,  f)
+                       unsigned long,  f, void *, a)
   LSS_INLINE _syscall3(int,     open,            const char*, p,
                        int,            f, int,    m)
   LSS_INLINE _syscall1(int,     pipe,            int*,        p)
@@ -1084,6 +1088,18 @@ struct stat64;
       return tid;
     }
     return LSS_NAME(getpid)();
+  }
+
+  LSS_INLINE void *LSS_NAME(mremap)(void *old_address, size_t old_size,
+                                    size_t new_size, int flags, ...) {
+    va_list ap;
+    void *new_address, *rc;
+    va_start(ap, flags);
+    new_address = va_arg(ap, void *);
+    rc = LSS_NAME(_mremap)(old_address, old_size, new_size,
+                           flags, new_address);
+    va_end(ap);
+    return rc;
   }
 
   LSS_INLINE int LSS_NAME(ptrace_detach)(pid_t pid) {
