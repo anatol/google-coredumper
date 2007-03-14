@@ -1225,7 +1225,8 @@ struct stat64;
                          int,                     t, int,       p)
     LSS_INLINE _syscall4(int, socketpair,         int,   d,
                          int,                     t, int,       p, int*, s)
-  #elif defined(__x86_64__)
+  #endif
+  #if defined(__x86_64__)
     LSS_INLINE _syscall6(void*, mmap,              void*, s,
                          size_t,                   l, int,               p,
                          int,                      f, int,               d,
