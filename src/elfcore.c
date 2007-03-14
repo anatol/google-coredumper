@@ -60,9 +60,9 @@
 #endif
 
 
-/* Data structures found in x86-32/64 and ARM core dumps on Linux; similar
- * data structures are defined in /usr/include/{linux,asm}/... but those
- * headers conflict with the rest of the libc headers. So we cannot
+/* Data structures found in x86-32/64, ARM, and MIPS core dumps on Linux;
+ * similar data structures are defined in /usr/include/{linux,asm}/... but
+ * those headers conflict with the rest of the libc headers. So we cannot
  * include them here.
  */
 
@@ -121,6 +121,15 @@
     unsigned int   init_flag;
   } fpregs;
   #define regs arm_regs         /* General purpose registers                 */
+#elif defined(mips)
+  typedef struct fpxregs {      /* No extended FPU registers on MIPS         */
+  } fpxregs;
+  typedef struct fpregs {
+    uint64_t fpuregs[32];
+    uint32_t fcr31;
+    uint32_t fir;
+  } fpregs;
+  #define regs mips_regs
 #endif
 
 typedef struct elf_timeval {    /* Time value with microsecond resolution    */
@@ -160,7 +169,7 @@ typedef struct prpsinfo {       /* Information about process                 */
   unsigned char  pr_zomb;       /* Zombie                                    */
   signed char    pr_nice;       /* Nice val                                  */
   unsigned long  pr_flag;       /* Flags                                     */
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(mips)
   uint32_t       pr_uid;        /* User ID                                   */
   uint32_t       pr_gid;        /* Group ID                                  */
 #else
@@ -177,6 +186,7 @@ typedef struct prpsinfo {       /* Information about process                 */
 
 
 typedef struct user {           /* Ptrace returns this data for thread state */
+#ifndef mips
   regs           regs;          /* CPU registers                             */
   unsigned long  fpvalid;       /* True if math co-processor being used      */
 #if defined(__i386__) || defined(__x86_64__)
@@ -203,6 +213,7 @@ typedef struct user {           /* Ptrace returns this data for thread state */
   fpregs         fpregs;        /* FPU registers                             */
   fpregs         *fpregs_ptr;   /* Pointer to FPU registers                  */
 #endif
+#endif
 } user;
 
 
@@ -227,6 +238,8 @@ typedef struct user {           /* Ptrace returns this data for thread state */
   #define ELF_ARCH  EM_386
 #elif defined(__ARM_ARCH_3__)
   #define ELF_ARCH  EM_ARM
+#elif defined(mips)
+  #define ELF_ARCH  EM_MIPS
 #endif
 
 
@@ -696,7 +709,7 @@ static int CreateElfCore(void *handle,
           Phdr   phdr;
           size_t offset   = sizeof(Ehdr) + (num_mappings + 1)*sizeof(Phdr);
           size_t filesz   = sizeof(Nhdr) + 4 + sizeof(struct prpsinfo) +
-                            sizeof(Nhdr) + 4 + sizeof(struct user) +
+                    (user ? sizeof(Nhdr) + 4 + sizeof(struct user) : 0) +
                             num_threads*(
                             + sizeof(Nhdr) + 4 + sizeof(struct prstatus)
                             + sizeof(Nhdr) + 4 + sizeof(struct fpregs));
@@ -754,12 +767,15 @@ static int CreateElfCore(void *handle,
               sizeof(struct prpsinfo)) {
             goto done;
           }
-          nhdr.n_descsz   = sizeof(struct user);
-          nhdr.n_type     = NT_PRXREG;
-          if (writer(handle, &nhdr, sizeof(Nhdr)) != sizeof(Nhdr) ||
-              writer(handle, "CORE", 4) != 4 ||
-              writer(handle, user, sizeof(struct user)) !=sizeof(struct user)){
-            goto done;
+          if (user) {
+            nhdr.n_descsz   = sizeof(struct user);
+            nhdr.n_type     = NT_PRXREG;
+            if (writer(handle, &nhdr, sizeof(Nhdr)) != sizeof(Nhdr) ||
+                writer(handle, "CORE", 4) != 4 ||
+                writer(handle, user, sizeof(struct user))
+                !=sizeof(struct user)) {
+              goto done;
+            }
           }
 
           for (i = num_threads; i-- > 0; ) {
@@ -780,7 +796,7 @@ static int CreateElfCore(void *handle,
             nhdr.n_type   = NT_FPREGSET;
             if (writer(handle, &nhdr, sizeof(Nhdr)) != sizeof(Nhdr) ||
                 writer(handle, "CORE", 4) != 4 ||
-                writer(handle, fpregs+1, sizeof(struct fpregs)) !=
+                writer(handle, fpregs+i, sizeof(struct fpregs)) !=
                 sizeof(struct fpregs)) {
               goto done;
             }
@@ -794,7 +810,7 @@ static int CreateElfCore(void *handle,
               nhdr.n_type   = NT_PRXFPREG;
               if (writer(handle, &nhdr, sizeof(Nhdr)) != sizeof(Nhdr) ||
                   writer(handle, "LINUX\000\000", 8) != 8 ||
-                  writer(handle, fpxregs+1, sizeof(struct fpxregs)) !=
+                  writer(handle, fpxregs+i, sizeof(struct fpxregs)) !=
                   sizeof(struct fpxregs)) {
                 goto done;
               }
@@ -1144,7 +1160,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
                         const struct CoredumperCompressor **selected_comp */) {
   long          i;
   int           rc = -1, fd = -1, threads = num_threads, hasSSE = 1;
-  user          user;
+  struct user   user, *puser = &user;
   prpsinfo      prpsinfo;
   prstatus      prstatus;
   regs          thread_regs[threads];
@@ -1154,6 +1170,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
   int           main_pid = ((Frame *)frame)->tid;
 
   /* Get thread status                                                       */
+  memset(puser,          0, sizeof(struct user));
   memset(thread_regs,    0, threads * sizeof(struct regs));
   memset(thread_fpregs,  0, threads * sizeof(struct fpregs));
   memset(thread_fpxregs, 0, threads * sizeof(struct fpxregs));
@@ -1162,11 +1179,71 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
 #ifdef THREADS
   for (i = 0; i < threads; i++) {
     char scratch[4096];
+    #ifdef mips
+    /* MIPS kernels do not support PTRACE_GETREGS, instead we have to call
+     * PTRACE_PEEKUSER go retrieve individual CPU registers. The indices
+     * for these registers do not exactly match with the order in the
+     * structures that get written to the core file, either. We use a lookup
+     * table to do the mapping.
+     * Incidentally, this also means that on MIPS we cannot use
+     * PTRACE_PEEKUSER to fill "struct user". There just is no such thing
+     * as a NT_PRXREG in our MIPS core files.
+     */
+    static const int map[sizeof(struct regs)/sizeof(long)] = {
+      -1, -1, -1, -1, -1, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,
+      14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+      -1, 68, 67, 66, 65, 64, -1 };
+    int j;
+    memset(thread_regs + i, 0, sizeof(struct regs));
+    for (j = 0; j < sizeof(struct regs)/sizeof(long); j++) {
+      if (map[j] >= 0 &&
+          sys_ptrace(PTRACE_PEEKUSER, pids[i], (void *)map[j],
+                     (unsigned long *)(thread_regs + i) + j)) {
+        ResumeAllProcessThreads(threads, pids);
+        goto error;
+      }
+    }
+
+    /* Older kernels do not support PTRACE_GETFPREGS, and require calling
+     * PTRACE_PEEKUSER. This is a little awkward because of the layout of
+     * "struct fpregs" that expands all 32bit variables to 64bits.
+     */
+    memset(thread_fpregs + i, 0xFF, sizeof(struct fpregs));
+    for (j = 0; j < 32; j++) {
+      if (sys_ptrace(PTRACE_PEEKUSER, pids[i], (void *)(32 + j),
+                     (uint64_t *)(thread_fpregs + i) + j)) {
+        ResumeAllProcessThreads(threads, pids);
+        goto error;
+      }
+    }
+    if (sys_ptrace(PTRACE_PEEKUSER, pids[i], (void *)69, scratch) == 0) {
+      memcpy(&thread_fpregs[i].fcr31, scratch, sizeof(thread_fpregs[i].fcr31));
+    }
+    if (sys_ptrace(PTRACE_PEEKUSER, pids[i], (void *)70, scratch) == 0) {
+      memcpy(&thread_fpregs[i].fir, scratch, sizeof(thread_fpregs[i].fir));
+    }
+
+    /* If the kernel supports it, PTRACE_GETFPREGS is a better way to
+     * retrieve the FP registers.
+     */
+    if (sys_ptrace(PTRACE_GETFPREGS, pids[i], scratch, scratch) == 0) {
+      memcpy(thread_fpregs + i, scratch, sizeof(struct fpregs));
+    }
+
+    /* Set the saved integer registers, if we are looking at the thread that
+     * called us.
+     */
+    if (main_pid == pids[i]) {
+      SET_FRAME(*(Frame *)frame, thread_regs[i]);
+    }
+    hasSSE = 0;
+    #else
     memset(scratch, 0xFF, sizeof(scratch));
     if (sys_ptrace(PTRACE_GETREGS, pids[i], scratch, scratch) == 0) {
       memcpy(thread_regs + i, scratch, sizeof(struct regs));
-      if (main_pid == pids[i])
+      if (main_pid == pids[i]) {
         SET_FRAME(*(Frame *)frame, thread_regs[i]);
+      }
       memset(scratch, 0xFF, sizeof(scratch));
       if (sys_ptrace(PTRACE_GETFPREGS, pids[i], scratch, scratch) == 0) {
         memcpy(thread_fpregs + i, scratch, sizeof(struct fpregs));
@@ -1181,20 +1258,28 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
         #else
         hasSSE = 0;
         #endif
-      } else
+      } else {
         goto ptrace;
+      }
     } else {
    ptrace: /* Oh, well, undo everything and get out of here                  */
       ResumeAllProcessThreads(threads, pids);
       goto error;
     }
+    #endif
   }
 
   /* Get parent's CPU registers, and user data structure                 */
-  for (i = 0; i < sizeof(struct user); i += sizeof(int))
-    sys_ptrace(PTRACE_PEEKUSER, pids[0], (void *)i,
-               ((int *)&user) + i/sizeof(int));
-  memcpy(&user.regs, thread_regs, sizeof(struct regs));
+  {
+    #ifndef mips
+    for (i = 0; i < sizeof(struct user)/sizeof(int); i++)
+      sys_ptrace(PTRACE_PEEKUSER, pids[0], (void *)(i*sizeof(int)),
+                 ((char *)&user) + i*sizeof(int));
+    memcpy(&user.regs, thread_regs, sizeof(struct regs));
+    #else
+    puser = NULL;
+    #endif
+  }
 #endif
 
   /* Build the PRPSINFO data structure                                       */
@@ -1410,7 +1495,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
             sys__exit(1);
           }
           
-          CreateElfCore(&fds[1], SimpleWriter, SimpleDone, &prpsinfo, &user,
+          CreateElfCore(&fds[1], SimpleWriter, SimpleDone, &prpsinfo, puser,
                         &prstatus, threads, pids, thread_regs, thread_fpregs,
                         hasSSE ? thread_fpxregs : NULL, pagesize);
           NO_INTR(sys_close(fds[1]));
@@ -1546,7 +1631,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
           writer                   = LimitWriter;
         }
         
-        rc = CreateElfCore(&writer_fds, writer, PipeDone, &prpsinfo, &user,
+        rc = CreateElfCore(&writer_fds, writer, PipeDone, &prpsinfo, puser,
                            &prstatus, threads, pids, thread_regs,
                            thread_fpregs, hasSSE ? thread_fpxregs : NULL,
                            pagesize);

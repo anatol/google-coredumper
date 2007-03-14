@@ -73,11 +73,11 @@
 #ifndef SYS_LINUX_SYSCALL_SUPPORT_H
 #define SYS_LINUX_SYSCALL_SUPPORT_H
 
-/* We currently only support x86-32, x86-64, and ARM on Linux. Porting to
- * other related platforms should not be difficult.
+/* We currently only support x86-32, x86-64, ARM, and MIPS on Linux.
+ * Porting to other related platforms should not be difficult.
  */
-#if (defined(__i386__) || defined(__x86_64__) || defined(__ARM_ARCH_3__)) && \
-    defined(__linux)
+#if (defined(__i386__) || defined(__x86_64__) || defined(__ARM_ARCH_3__) || \
+     defined(mips)) && defined(__linux)
 
 #ifndef SYS_CPLUSPLUS
 #ifdef __cplusplus
@@ -156,8 +156,20 @@ struct stat64;
 #endif
 
 #if defined(__i386__)
+#ifndef __NR_setresuid
+#define __NR_setresuid          164
+#define __NR_setresgid          170
+#endif
 #ifndef __NR_ugetrlimit
 #define __NR_ugetrlimit         191
+#endif
+#ifndef __NR_setresuid32
+#define __NR_setresuid32        208
+#define __NR_setresgid32        210
+#endif
+#ifndef __NR_setfsuid32
+#define __NR_setfsuid32         215
+#define __NR_setfsgid32         216
 #endif
 #ifndef __NR_getdents64
 #define __NR_getdents64         220
@@ -171,18 +183,6 @@ struct stat64;
 #ifndef __NR_sched_setaffinity
 #define __NR_sched_setaffinity  241
 #define __NR_sched_getaffinity  242
-#endif
-#ifndef __NR_setresuid
-#define __NR_setresuid          164
-#define __NR_setresgid          170
-#endif
-#ifndef __NR_setresuid32
-#define __NR_setresuid32        208
-#define __NR_setresgid32        210
-#endif
-#ifndef __NR_setfsuid32
-#define __NR_setfsuid32         215
-#define __NR_setfsgid32         216
 #endif
 #ifndef __NR_set_tid_address
 #define __NR_set_tid_address    258
@@ -201,8 +201,20 @@ struct stat64;
 #endif
 /* End of i386 definitions                                                   */
 #elif defined(__ARM_ARCH_3__)
+#ifndef __NR_setresuid
+#define __NR_setresuid          (__NR_SYSCALL_BASE + 164)
+#define __NR_setresgid          (__NR_SYSCALL_BASE + 170)
+#endif
 #ifndef __NR_ugetrlimit
 #define __NR_ugetrlimit         (__NR_SYSCALL_BASE + 191)
+#endif
+#ifndef __NR_setresuid32
+#define __NR_setresuid32        (__NR_SYSCALL_BASE + 208)
+#define __NR_setresgid32        (__NR_SYSCALL_BASE + 210)
+#endif
+#ifndef __NR_setfsuid32
+#define __NR_setfsuid32         (__NR_SYSCALL_BASE + 215)
+#define __NR_setfsgid32         (__NR_SYSCALL_BASE + 216)
 #endif
 #ifndef __NR_getdents64
 #define __NR_getdents64         (__NR_SYSCALL_BASE + 217)
@@ -217,18 +229,6 @@ struct stat64;
 #define __NR_sched_setaffinity  (__NR_SYSCALL_BASE + 241)
 #define __NR_sched_getaffinity  (__NR_SYSCALL_BASE + 242)
 #endif
-#ifndef __NR_setresuid
-#define __NR_setresuid          (__NR_SYSCALL_BASE + 164)
-#define __NR_setresgid          (__NR_SYSCALL_BASE + 170)
-#endif
-#ifndef __NR_setresuid32
-#define __NR_setresuid32        (__NR_SYSCALL_BASE + 208)
-#define __NR_setresgid32        (__NR_SYSCALL_BASE + 210)
-#endif
-#ifndef __NR_setfsuid32
-#define __NR_setfsuid32         (__NR_SYSCALL_BASE + 215)
-#define __NR_setfsgid32         (__NR_SYSCALL_BASE + 216)
-#endif
 #ifndef __NR_set_tid_address
 #define __NR_set_tid_address    (__NR_SYSCALL_BASE + 256)
 #endif
@@ -237,8 +237,9 @@ struct stat64;
 #endif
 /* End of ARM 3 definitions                                                  */
 #elif defined(__x86_64__)
-#ifndef __NR_getdents64
-#define __NR_getdents64         217
+#ifndef __NR_setresuid
+#define __NR_setresuid          117
+#define __NR_setresgid          119
 #endif
 #ifndef __NR_gettid
 #define __NR_gettid             186
@@ -250,9 +251,8 @@ struct stat64;
 #define __NR_sched_setaffinity  203
 #define __NR_sched_getaffinity  204
 #endif
-#ifndef __NR_setresuid
-#define __NR_setresuid          117
-#define __NR_setresgid          119
+#ifndef __NR_getdents64
+#define __NR_getdents64         217
 #endif
 #ifndef __NR_set_tid_address
 #define __NR_set_tid_address    218
@@ -270,6 +270,105 @@ struct stat64;
 #define __NR_move_pages         279
 #endif
 /* End of x86-64 definitions                                                 */
+#elif defined(mips)
+#if _MIPS_SIM == _MIPS_SIM_ABI32
+#ifndef __NR_setresuid
+#define __NR_setresuid          (__NR_Linux + 185)
+#define __NR_setresgid          (__NR_Linux + 190)
+#endif
+#ifndef __NR_getdents64
+#define __NR_getdents64         (__NR_Linux + 219)
+#endif
+#ifndef __NR_gettid
+#define __NR_gettid             (__NR_Linux + 222)
+#endif
+#ifndef __NR_futex
+#define __NR_futex              (__NR_Linux + 238)
+#endif
+#ifndef __NR_sched_setaffinity
+#define __NR_sched_setaffinity  (__NR_Linux + 239)
+#define __NR_sched_getaffinity  (__NR_Linux + 240)
+#endif
+#ifndef __NR_set_tid_address
+#define __NR_set_tid_address    (__NR_Linux + 252)
+#endif
+#ifndef __NR_openat
+#define __NR_openat             (__NR_Linux + 288)
+#endif
+#ifndef __NR_fstatat
+#define __NR_fstatat            (__NR_Linux + 293)
+#endif
+#ifndef __NR_unlinkat
+#define __NR_unlinkat           (__NR_Linux + 294)
+#endif
+#ifndef __NR_move_pages
+#define __NR_move_pages         (__NR_Linux + 308)
+#endif
+/* End of MIPS (old 32bit API) definitions */
+#elif  _MIPS_SIM == _MIPS_SIM_ABI64
+#ifndef __NR_setresuid
+#define __NR_setresuid          (__NR_Linux + 115)
+#define __NR_setresgid          (__NR_Linux + 117)
+#endif
+#ifndef __NR_gettid
+#define __NR_gettid             (__NR_Linux + 178)
+#endif
+#ifndef __NR_futex
+#define __NR_futex              (__NR_Linux + 194)
+#endif
+#ifndef __NR_sched_setaffinity
+#define __NR_sched_setaffinity  (__NR_Linux + 195)
+#define __NR_sched_getaffinity  (__NR_Linux + 196)
+#endif
+#ifndef __NR_set_tid_address
+#define __NR_set_tid_address    (__NR_Linux + 212)
+#endif
+#ifndef __NR_openat
+#define __NR_openat             (__NR_Linux + 247)
+#endif
+#ifndef __NR_fstatat
+#define __NR_fstatat            (__NR_Linux + 252)
+#endif
+#ifndef __NR_unlinkat
+#define __NR_unlinkat           (__NR_Linux + 253)
+#endif
+#ifndef __NR_move_pages
+#define __NR_move_pages         (__NR_Linux + 267)
+#endif
+/* End of MIPS (64bit API) definitions */
+#else
+#ifndef __NR_setresuid
+#define __NR_setresuid          (__NR_Linux + 115)
+#define __NR_setresgid          (__NR_Linux + 117)
+#endif
+#ifndef __NR_gettid
+#define __NR_gettid             (__NR_Linux + 178)
+#endif
+#ifndef __NR_futex
+#define __NR_futex              (__NR_Linux + 194)
+#endif
+#ifndef __NR_sched_setaffinity
+#define __NR_sched_setaffinity  (__NR_Linux + 195)
+#define __NR_sched_getaffinity  (__NR_Linux + 196)
+#endif
+#ifndef __NR_set_tid_address
+#define __NR_set_tid_address    (__NR_Linux + 213)
+#endif
+#ifndef __NR_openat
+#define __NR_openat             (__NR_Linux + 251)
+#endif
+#ifndef __NR_fstatat
+#define __NR_fstatat            (__NR_Linux + 256)
+#endif
+#ifndef __NR_unlinkat
+#define __NR_unlinkat           (__NR_Linux + 257)
+#endif
+#ifndef __NR_move_pages
+#define __NR_move_pages         (__NR_Linux + 271)
+#endif
+/* End of MIPS (new 32bit API) definitions */
+#endif
+/* End of MIPS definitions */
 #endif
 
 
@@ -332,6 +431,10 @@ struct stat64;
   #endif
 
   #undef  LSS_RETURN
+  #ifndef mips
+  /* Failing system calls return a negative result in the range of
+   * -1..-4095. These are "errno" values with the sign inverted.
+   */
   #define LSS_RETURN(type, res)                                               \
     do {                                                                      \
       if ((unsigned long)(res) >= (unsigned long)(-4095)) {                   \
@@ -340,6 +443,19 @@ struct stat64;
       }                                                                       \
       return (type) (res);                                                    \
     } while (0)
+  #else
+  /* On MIPS, failing system calls return -1, and set errno in a
+   * separate CPU register.
+   */
+  #define LSS_RETURN(type, res, err)                                          \
+    do {                                                                      \
+      if (err) {                                                              \
+        LSS_ERRNO = (res);                                                    \
+        res = -1;                                                             \
+      }                                                                       \
+      return (type) (res);                                                    \
+    } while (0)
+  #endif
   #if defined(__i386__)
     /* In PIC mode (e.g. when building shared libraries), gcc for i386
      * reserves ebx. Unfortunately, most distribution ship with implementations
@@ -768,7 +884,7 @@ struct stat64;
                              /* if (%r0 != 0)
                               *   return %r0;
                               */
-                             "movs  r0,r0\n"
+                             "movs  %0,r0\n"
                              "bne   1f\n"
 
                              /* In the child, now. Call "fn(arg)".
@@ -788,6 +904,226 @@ struct stat64;
                              : "lr", "memory");
       }
       LSS_RETURN(int, __res);
+    }
+  #elif defined(mips)
+    #undef LSS_REG
+    #define LSS_REG(r,a) register unsigned long __r##r __asm__("$"#r) =       \
+                                 (unsigned long)(a)
+    #undef  LSS_BODY
+    #define LSS_BODY(type,name,r7,...)                                        \
+          register unsigned long __v0 __asm__("$2") = __NR_##name;            \
+          __asm__ __volatile__ ("syscall\n"                                   \
+                                : "=&r"(__v0), r7 (__r7)                      \
+                                : "0"(__v0), ##__VA_ARGS__                    \
+                                : "$8", "$9", "$10", "$11", "$12",            \
+                                  "$13", "$14", "$15", "$24", "memory");      \
+          LSS_RETURN(type, __v0, __r7)
+    #undef _syscall0
+    #define _syscall0(type, name)                                             \
+      type LSS_NAME(name)() {                                                 \
+        register unsigned long __r7 __asm__("$7");                            \
+        LSS_BODY(type, name, "=r");                                           \
+      }
+    #undef _syscall1
+    #define _syscall1(type, name, type1, arg1)                                \
+      type LSS_NAME(name)(type1 arg1) {                                       \
+        register unsigned long __r7 __asm__("$7");                            \
+        LSS_REG(4, arg1); LSS_BODY(type, name, "=r", "r"(__r4));              \
+      }
+    #undef _syscall2
+    #define _syscall2(type, name, type1, arg1, type2, arg2)                   \
+      type LSS_NAME(name)(type1 arg1, type2 arg2) {                           \
+        register unsigned long __r7 __asm__("$7");                            \
+        LSS_REG(4, arg1); LSS_REG(5, arg2);                                   \
+        LSS_BODY(type, name, "=r", "r"(__r4), "r"(__r5));                     \
+      }
+    #undef _syscall3
+    #define _syscall3(type, name, type1, arg1, type2, arg2, type3, arg3)      \
+      type LSS_NAME(name)(type1 arg1, type2 arg2, type3 arg3) {               \
+        register unsigned long __r7 __asm__("$7");                            \
+        LSS_REG(4, arg1); LSS_REG(5, arg2); LSS_REG(6, arg3);                 \
+        LSS_BODY(type, name, "=r", "r"(__r4), "r"(__r5), "r"(__r6));          \
+      }
+    #undef _syscall4
+    #define _syscall4(type,name,type1,arg1,type2,arg2,type3,arg3,type4,arg4)  \
+      type LSS_NAME(name)(type1 arg1, type2 arg2, type3 arg3, type4 arg4) {   \
+        LSS_REG(4, arg1); LSS_REG(5, arg2); LSS_REG(6, arg3);                 \
+        LSS_REG(7, arg4);                                                     \
+        LSS_BODY(type, name, "+r", "r"(__r4), "r"(__r5), "r"(__r6));          \
+      }
+    #undef _syscall5
+    #if _MIPS_SIM == _MIPS_SIM_ABI32
+    /* The old 32bit MIPS system call API passes the fifth and sixth argument
+     * on the stack, whereas the new APIs use registers "r8" and "r9".
+     */
+    #define _syscall5(type,name,type1,arg1,type2,arg2,type3,arg3,type4,arg4,  \
+                      type5,arg5)                                             \
+      type LSS_NAME(name)(type1 arg1, type2 arg2, type3 arg3, type4 arg4,     \
+                          type5 arg5) {                                       \
+        LSS_REG(4, arg1); LSS_REG(5, arg2); LSS_REG(6, arg3);                 \
+        LSS_REG(7, arg4);                                                     \
+        register unsigned long __v0 __asm__("$2");                            \
+        __asm__ __volatile__ (".set noreorder\n"                              \
+                              "lw    $2, %6\n"                                \
+                              "subu  $29, 32\n"                               \
+                              "sw    $2, 16($29)\n"                           \
+                              "li    $2, %2\n"                                \
+                              "syscall\n"                                     \
+                              "addiu $29, 32\n"                               \
+                              ".set reorder\n"                                \
+                              : "=&r"(__v0), "+r" (__r7)                      \
+                              : "i" (__NR_##name), "r"(__r4), "r"(__r5),      \
+                                "r"(__r6), "m" ((unsigned long)arg5)          \
+                              : "$8", "$9", "$10", "$11", "$12",              \
+                                "$13", "$14", "$15", "$24", "memory");        \
+        LSS_RETURN(type, __v0, __r7);                                         \
+      }
+    #else
+    #define _syscall5(type,name,type1,arg1,type2,arg2,type3,arg3,type4,arg4,  \
+                      type5,arg5)                                             \
+      type LSS_NAME(name)(type1 arg1, type2 arg2, type3 arg3, type4 arg4,     \
+                          type5 arg5) {                                       \
+        LSS_REG(4, arg1); LSS_REG(5, arg2); LSS_REG(6, arg3);                 \
+        LSS_REG(7, arg4); LSS_REG(8, arg5);                                   \
+        LSS_BODY(type, name, "+r", "r"(__r4), "r"(__r5), "r"(__r6),           \
+                 "r"(__r8));                                                  \
+      }
+    #endif
+    #undef _syscall6
+    #if _MIPS_SIM == _MIPS_SIM_ABI32
+    /* The old 32bit MIPS system call API passes the fifth and sixth argument
+     * on the stack, whereas the new APIs use registers "r8" and "r9".
+     */
+    #define _syscall6(type,name,type1,arg1,type2,arg2,type3,arg3,type4,arg4,  \
+                      type5,arg5,type6,arg6)                                  \
+      type LSS_NAME(name)(type1 arg1, type2 arg2, type3 arg3, type4 arg4,     \
+                          type5 arg5, type6 arg6) {                           \
+        LSS_REG(4, arg1); LSS_REG(5, arg2); LSS_REG(6, arg3);                 \
+        LSS_REG(7, arg4);                                                     \
+        register unsigned long __v0 __asm__("$2");                            \
+        __asm__ __volatile__ (".set noreorder\n"                              \
+                              "lw    $2, %6\n"                                \
+                              "lw    $8, %7\n"                                \
+                              "subu  $29, 32\n"                               \
+                              "sw    $2, 16($29)\n"                           \
+                              "sw    $8, 20($29)\n"                           \
+                              "li    $2, %2\n"                                \
+                              "syscall\n"                                     \
+                              "addiu $29, 32\n"                               \
+                              ".set reorder\n"                                \
+                              : "=&r"(__v0), "+r" (__r7)                      \
+                              : "i" (__NR_##name), "r"(__r4), "r"(__r5),      \
+                                "r"(__r6), "m" ((unsigned long)arg5),         \
+                                "m" ((unsigned long)arg6)                     \
+                              : "$8", "$9", "$10", "$11", "$12",              \
+                                "$13", "$14", "$15", "$24", "memory");        \
+        LSS_RETURN(type, __v0, __r7);                                         \
+      }
+    #else
+    #define _syscall5(type,name,type1,arg1,type2,arg2,type3,arg3,type4,arg4,  \
+                      type5,arg5,type6,arg6)                                  \
+      type LSS_NAME(name)(type1 arg1, type2 arg2, type3 arg3, type4 arg4,     \
+                          type5 arg5,type6 arg6) {                            \
+        LSS_REG(4, arg1); LSS_REG(5, arg2); LSS_REG(6, arg3);                 \
+        LSS_REG(7, arg4); LSS_REG(8, arg5); LSS_REG(9, arg6);                 \
+        LSS_BODY(type, name, "+r", "r"(__r4), "r"(__r5), "r"(__r6),           \
+                 "r"(__r8), "r"(__r9));                                       \
+      }
+    #endif
+    LSS_INLINE int LSS_NAME(clone)(int (*fn)(void *), void *child_stack,
+                                   int flags, void *arg, int *parent_tidptr,
+                                   void *newtls, int *child_tidptr) {
+      register unsigned long __v0 __asm__("$2");
+      register unsigned long __r7 __asm__("$7") = (unsigned long)newtls;
+      {
+        register int   __flags __asm__("$4") = flags;
+        register void *__stack __asm__("$5") = child_stack;
+        register void *__ptid  __asm__("$6") = parent_tidptr;
+        register int  *__ctid  __asm__("$8") = child_tidptr;
+        __asm__ __volatile__(
+          #if _MIPS_SIM == _MIPS_SIM_ABI32 && _MIPS_SZPTR == 32
+                             "subu  $29,24\n"
+          #elif _MIPS_SIM == _MIPS_SIM_NABI32
+                             "sub   $29,16\n"
+          #else
+                             "dsubu $29,16\n"
+          #endif
+
+                             /* if (fn == NULL || child_stack == NULL)
+                              *   return -EINVAL;
+                              */
+                             "li    %0,%2\n"
+                             "beqz  %5,1f\n"
+                             "beqz  %6,1f\n"
+
+                             /* Push "arg" and "fn" onto the stack that will be
+                              * used by the child.
+                              */
+          #if _MIPS_SIM == _MIPS_SIM_ABI32 && _MIPS_SZPTR == 32
+                             "subu  %6,32\n"
+                             "sw    %5,0(%6)\n"
+                             "sw    %8,4(%6)\n"
+          #elif _MIPS_SIM == _MIPS_SIM_NABI32
+                             "sub   %6,32\n"
+                             "sw    %5,0(%6)\n"
+                             "sw    %8,8(%6)\n"
+          #else
+                             "dsubu %6,32\n"
+                             "sd    %5,0(%6)\n"
+                             "sd    %8,8(%6)\n"
+          #endif
+
+                             /* $7 = syscall($4 = flags,
+                              *              $5 = child_stack,
+                              *              $6 = parent_tidptr,
+                              *              $7 = newtls,
+                              *              $8 = child_tidptr)
+                              */
+                             "li    $2,%3\n"
+                             "syscall\n"
+
+                             /* if ($7 != 0)
+                              *   return $2;
+                              */
+                             "bnez  $7,1f\n"
+                             "bnez  $2,1f\n"
+
+                             /* In the child, now. Call "fn(arg)".
+                              */
+          #if _MIPS_SIM == _MIPS_SIM_ABI32 && _MIPS_SZPTR == 32
+                            "lw    $25,0($29)\n"
+                            "lw    $4,4($29)\n"
+          #elif _MIPS_SIM == _MIPS_SIM_NABI32
+                            "lw    $25,0($29)\n"
+                            "lw    $4,8($29)\n"
+          #else
+                            "ld    $25,0($29)\n"
+                            "ld    $4,8($29)\n"
+          #endif
+                            "jalr  $25\n"
+
+                             /* Call _exit($2)
+                              */
+                            "move  $4,$2\n"
+                            "li    $2,%4\n"
+                            "syscall\n"
+
+                           "1:\n"
+          #if _MIPS_SIM == _MIPS_SIM_ABI32 && _MIPS_SZPTR == 32
+                             "addu  $29, 24\n"
+          #elif _MIPS_SIM == _MIPS_SIM_NABI32
+                             "add   $29, 16\n"
+          #else
+                             "daddu $29,16\n"
+          #endif
+                             : "=&r" (__v0), "=r" (__r7)
+                             : "i"(-EINVAL), "i"(__NR_clone), "i"(__NR_exit),
+                               "r"(fn), "r"(__stack), "r"(__flags), "r"(arg),
+                               "r"(__ptid), "r"(__r7), "r"(__ctid)
+                             : "$9", "$10", "$11", "$12", "$13", "$14", "$15",
+                               "$24", "memory");
+      }
+      LSS_RETURN(int, __v0, __r7);
     }
   #endif
   #define __NR__exit   __NR_exit
@@ -830,14 +1166,13 @@ struct stat64;
   LSS_INLINE _syscall2(int,     munmap,          void*,       s,
                        size_t,         l)
   LSS_INLINE _syscall6(long,    move_pages,      pid_t,       p,
-                       unsigned long,  n, void **,g, int *, d,
+                       unsigned long,  n, void **,g, int *,   d,
                        int *,          s, int,    f)
   LSS_INLINE _syscall5(void*,   _mremap,         void*,       o,
                        size_t,         os,       size_t,      ns,
                        unsigned long,  f, void *, a)
   LSS_INLINE _syscall3(int,     open,            const char*, p,
                        int,            f, int,    m)
-  LSS_INLINE _syscall1(int,     pipe,            int*,        p)
   LSS_INLINE _syscall3(int,     poll,            struct pollfd*, u,
                        unsigned int,   n, int,    t)
   LSS_INLINE _syscall2(int,     prctl,           int,         o,
@@ -874,14 +1209,8 @@ struct stat64;
                        const void *,   b, size_t, c)
   LSS_INLINE _syscall3(ssize_t, writev,           int,        f,
                        const struct iovec *, v, size_t, c)
-  #if defined(__x86_64__)
-    LSS_INLINE _syscall6(void*, mmap,              void*, s,
-                         size_t,                   l, int,               p,
-                         int,                      f, int,               d,
-                         __off64_t,                o)
-    LSS_INLINE _syscall4(int, newfstatat,         int,   d,
-                         const char *,            p,
-                         struct stat *,           b, int, f)
+  #if defined(__x86_64__) ||                                                  \
+     (defined(mips) && _MIPS_SIM != _MIPS_SIM_ABI32)
     LSS_INLINE _syscall3(int, recvmsg,            int,   s,
                          struct msghdr*,          m, int, f)
     LSS_INLINE _syscall3(int, sendmsg,            int,   s,
@@ -892,6 +1221,18 @@ struct stat64;
                          const struct sockaddr*,  a, int, t)
     LSS_INLINE _syscall2(int, shutdown,           int,   s,
                          int,                     h)
+    LSS_INLINE _syscall3(int, socket,             int,   d,
+                         int,                     t, int,       p)
+    LSS_INLINE _syscall4(int, socketpair,         int,   d,
+                         int,                     t, int,       p, int*, s)
+  #elif defined(__x86_64__)
+    LSS_INLINE _syscall6(void*, mmap,              void*, s,
+                         size_t,                   l, int,               p,
+                         int,                      f, int,               d,
+                         __off64_t,                o)
+    LSS_INLINE _syscall4(int, newfstatat,         int,   d,
+                         const char *,            p,
+                         struct stat *,           b, int, f)
     LSS_INLINE _syscall4(int, rt_sigaction,       int,   s,
                          const struct sigaction*, a,
                          struct sigaction*,       o, int,      c)
@@ -899,10 +1240,6 @@ struct stat64;
                          int,                     c)
     LSS_INLINE _syscall4(int, rt_sigprocmask,     int,   h,
                          const sigset_t*,         s, sigset_t*, o, int,  c);
-    LSS_INLINE _syscall3(int, socket,             int,   d,
-                         int,                     t, int,       p)
-    LSS_INLINE _syscall4(int, socketpair,         int,   d,
-                         int,                     t, int,       p, int*, s)
 
     LSS_INLINE int LSS_NAME(setfsgid32)(gid_t gid) {
       return LSS_NAME(setfsgid)(gid);
@@ -935,7 +1272,8 @@ struct stat64;
       return LSS_NAME(rt_sigprocmask)(how, set, oldset, (_NSIG+6)/8);
     }
   #endif
-  #if defined(__x86_64__) || defined(__ARM_ARCH_3__)
+  #if defined(__x86_64__) || defined(__ARM_ARCH_3__) ||                       \
+     (defined(mips) && _MIPS_SIM != _MIPS_SIM_ABI32)
     LSS_INLINE _syscall4(pid_t, wait4,            pid_t, p,
                          int*,                    s, int,       o,
                          struct rusage*,          r)
@@ -953,28 +1291,13 @@ struct stat64;
     #define __NR__setfsuid32  __NR_setfsuid32
     #define __NR__setresgid32 __NR_setresgid32
     #define __NR__setresuid32 __NR_setresuid32
-    #define __NR__socketcall  __NR_socketcall
-    LSS_INLINE _syscall5(int, _llseek,     uint, fd, ulong, hi, ulong, lo,
-                         loff_t *, res, uint, wh)
     LSS_INLINE _syscall2(int,   ugetrlimit,        int, r,struct rlimit*,l)
-    LSS_INLINE _syscall1(void*, mmap,              void*, a)
-    LSS_INLINE _syscall6(void*, mmap2,             void*, s,
-                         size_t,                   l, int,               p,
-                         int,                      f, int,               d,
-                         __off64_t,                o)
     LSS_INLINE _syscall1(int,     _setfsgid32,      gid_t,       f)
     LSS_INLINE _syscall1(int,     _setfsuid32,      uid_t,       f)
     LSS_INLINE _syscall3(int,     _setresgid32,    gid_t,       r,
                          gid_t,          e, gid_t,  s)
     LSS_INLINE _syscall3(int,     _setresuid32,    uid_t,       r,
                          uid_t,          e, uid_t,  s)
-    LSS_INLINE _syscall3(int,     sigaction,       int,   s,
-                         const struct sigaction*,  a, struct sigaction*, o)
-    LSS_INLINE _syscall1(int,     sigpending,      sigset_t*, s)
-    LSS_INLINE _syscall3(int,     sigprocmask,     int,   h,
-                         const sigset_t*,          s, sigset_t*,         o)
-    LSS_INLINE _syscall2(int,      _socketcall,    int,   c,
-                         va_list,                  a)
 
     LSS_INLINE int LSS_NAME(setfsgid32)(gid_t gid) {
       int rc;
@@ -1031,6 +1354,24 @@ struct stat64;
       }
       return rc;
     }
+  #endif
+  #if defined(__i386__) || defined(__ARM_ARCH_3__) ||                         \
+     (defined(mips) && _MIPS_SIM == _MIPS_SIM_ABI32)
+    #define __NR__socketcall  __NR_socketcall
+    LSS_INLINE _syscall5(int, _llseek,     uint, fd, ulong, hi, ulong, lo,
+                         loff_t *, res, uint, wh)
+    LSS_INLINE _syscall1(void*, mmap,              void*, a)
+    LSS_INLINE _syscall6(void*, mmap2,             void*, s,
+                         size_t,                   l, int,               p,
+                         int,                      f, int,               d,
+                         __off64_t,                o)
+    LSS_INLINE _syscall3(int,     sigaction,       int,   s,
+                         const struct sigaction*,  a, struct sigaction*, o)
+    LSS_INLINE _syscall1(int,     sigpending,      sigset_t*, s)
+    LSS_INLINE _syscall3(int,     sigprocmask,     int,   h,
+                         const sigset_t*,          s, sigset_t*,         o)
+    LSS_INLINE _syscall2(int,      _socketcall,    int,   c,
+                         va_list,                  a)
 
     LSS_INLINE int LSS_NAME(socketcall)(int op, ...) {
       int rc;
@@ -1073,8 +1414,36 @@ struct stat64;
     LSS_INLINE _syscall4(int,   fstatat64,        int,   d,
                          const char *,      p,
                          struct stat64 *,   b,    int,   f)
+  #endif
+  #if defined(__i386__) ||                                                    \
+     (defined(mips) && _MIPS_SIM == _MIPS_SIM_ABI32)
     LSS_INLINE _syscall3(pid_t, waitpid,          pid_t, p,
                          int*,              s,    int,   o)
+  #endif
+  #if defined(mips)
+    /* sys_pipe() on MIPS has non-standard calling conventions, as it returns
+     * both file handles through CPU registers.
+     */
+    LSS_INLINE int LSS_NAME(pipe)(int *p) {
+      register unsigned long __v0 __asm__("$2") = __NR_pipe;
+      register unsigned long __v1 __asm__("$3");
+      register unsigned long __r7 __asm__("$7");
+      __asm__ __volatile__ ("syscall\n"
+                            : "=&r"(__v0), "=&r"(__v1), "+r" (__r7)
+                            : "0"(__v0)
+                            : "$8", "$9", "$10", "$11", "$12",
+                              "$13", "$14", "$15", "$24", "memory");
+      if (__r7) {
+        LSS_ERRNO = __v0;
+        return -1;
+      } else {
+        p[0] = __v0;
+        p[1] = __v1;
+        return 0;
+      }
+    }
+  #else
+    LSS_INLINE _syscall1(int,     pipe,            int*,        p)
   #endif
 
   LSS_INLINE int LSS_NAME(execv)(const char *path, const char * const argv[]) {

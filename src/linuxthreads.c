@@ -35,8 +35,8 @@
 
 #ifdef THREADS
 
-#include <asm/stat.h>
 #include <fcntl.h>
+#include <asm/stat.h>
 #include <sched.h>
 #include <signal.h>
 #include <stdlib.h>
