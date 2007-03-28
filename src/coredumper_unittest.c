@@ -138,7 +138,8 @@ static void CheckWithGDB(FILE *input, FILE *output, const char *filename,
   const char **ptr, *arg = "";
   struct sigaction sa;
 
-#if defined(__i386__) || defined(__x86_64) || defined(__ARM_ARCH_3__)
+#if defined(__i386__) || defined(__x86_64) || defined(__ARM_ARCH_3__) || \
+    defined(mips)
   /* If we have a platform-specific FRAME() macro, we expect the stack trace
    * to be unrolled all the way to WriteCoreDump().
    */

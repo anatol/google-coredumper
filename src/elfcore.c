@@ -33,6 +33,9 @@
 
 #include "elfcore.h"
 #if defined DUMPER
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include <elf.h>
 #include <fcntl.h>
@@ -185,12 +188,12 @@ typedef struct prpsinfo {       /* Information about process                 */
 } prpsinfo;
 
 
-typedef struct user {           /* Ptrace returns this data for thread state */
+typedef struct core_user {      /* Ptrace returns this data for thread state */
 #ifndef mips
-  regs           regs;          /* CPU registers                             */
+  struct regs    regs;          /* CPU registers                             */
   unsigned long  fpvalid;       /* True if math co-processor being used      */
 #if defined(__i386__) || defined(__x86_64__)
-  fpregs         fpregs;        /* FPU registers                             */
+  struct fpregs  fpregs;        /* FPU registers                             */
 #endif
   unsigned long  tsize;         /* Text segment size in pages                */
   unsigned long  dsize;         /* Data segment size in pages                */
@@ -199,9 +202,9 @@ typedef struct user {           /* Ptrace returns this data for thread state */
   unsigned long  start_stack;   /* Starting virtual address of stack area    */
   unsigned long  signal;        /* Signal that caused the core dump          */
   unsigned long  reserved;      /* No longer used                            */
-  regs           *regs_ptr;     /* Used by gdb to help find the CPU registers*/
+  struct regs    *regs_ptr;     /* Used by gdb to help find the CPU registers*/
 #if defined(__i386__) || defined(__x86_64__)
-  fpregs         *fpregs_ptr;   /* Pointer to FPU registers                  */
+  struct fpregs  *fpregs_ptr;   /* Pointer to FPU registers                  */
 #endif
   unsigned long  magic;         /* Magic for old A.OUT core files            */
   char           comm[32];      /* User command that was responsible         */
@@ -210,11 +213,11 @@ typedef struct user {           /* Ptrace returns this data for thread state */
   unsigned long  error_code;    /* CPU error code or 0                       */
   unsigned long  fault_address; /* CR3 or 0                                  */
 #elif defined(__ARM_ARCH_3__)
-  fpregs         fpregs;        /* FPU registers                             */
-  fpregs         *fpregs_ptr;   /* Pointer to FPU registers                  */
+  struct fpregs  fpregs;        /* FPU registers                             */
+  struct fpregs  *fpregs_ptr;   /* Pointer to FPU registers                  */
 #endif
 #endif
-} user;
+} core_user;
 
 
 #if __WORDSIZE == 64
@@ -243,31 +246,61 @@ typedef struct user {           /* Ptrace returns this data for thread state */
 #endif
 
 
+/* Wrap a class around system calls, in order to give us access to
+ * a private copy of errno. This only works in C++, but it has the
+ * advantage of not needing nested functions, which are a non-standard
+ * language extension.
+ */
+#ifdef __cplusplus
+namespace {
+  class SysCalls {
+   public:
+    #define SYS_CPLUSPLUS
+    #define SYS_ERRNO     my_errno
+    #define SYS_INLINE    inline
+    #define SYS_PREFIX    -1
+    #undef  SYS_LINUX_SYSCALL_SUPPORT_H
+    #include "linux_syscall_support.h"
+    SysCalls() : my_errno(0) { }
+    int my_errno;
+  };
+}
+#define ERRNO sys.my_errno
+#else
+#define ERRNO my_errno
+#endif
+
+
 /* Re-runs fn until it doesn't cause EINTR
  */
 #define NO_INTR(fn)    do {} while ((fn) < 0 && errno == EINTR)
-#define MY_NO_INTR(fn) do {} while ((fn) < 0 && my_errno == EINTR)
+#define MY_NO_INTR(fn) do {} while ((fn) < 0 && ERRNO == EINTR)
 
 
 /* Wrapper for read() which is guaranteed to never return EINTR.
  */
 static ssize_t c_read(int f, void *buf, size_t bytes, int *errno_) {
-  int my_errno;
   /* scope */ {
     /* Define a private copy of syscall macros, which does not modify the
      * global copy of errno.
      */
-    #define SYS_ERRNO my_errno
-    #define SYS_INLINE inline
-    #undef  SYS_LINUX_SYSCALL_SUPPORT_H
-    #define SYS_PREFIX 0
-    #include "linux_syscall_support.h"
-  
+    #ifdef __cplusplus
+      #define sys0_read  sys.read
+      SysCalls sys;
+    #else
+      int my_errno;
+      #define SYS_ERRNO  my_errno
+      #define SYS_INLINE inline
+      #define SYS_PREFIX 0
+      #undef  SYS_LINUX_SYSCALL_SUPPORT_H
+      #include "linux_syscall_support.h"
+    #endif
+
     if (bytes > 0) {
       ssize_t rc;
       MY_NO_INTR(rc = sys0_read(f, buf, bytes));
       if (rc < 0) {
-        *errno_ = my_errno;
+        *errno_ = ERRNO;
       }
       return rc;
     }
@@ -280,16 +313,21 @@ static ssize_t c_read(int f, void *buf, size_t bytes, int *errno_) {
  * short writes.
  */
 static ssize_t c_write(int f, const void *void_buf, size_t bytes, int *errno_){
-  int my_errno;
   /* scope */ {
     /* Define a private copy of syscall macros, which does not modify the
      * global copy of errno.
      */
-    #define SYS_ERRNO my_errno
-    #define SYS_INLINE inline
-    #undef  SYS_LINUX_SYSCALL_SUPPORT_H
-    #define SYS_PREFIX 0
-    #include "linux_syscall_support.h"
+    #ifdef __cplusplus
+      #define sys0_write sys.write
+      SysCalls sys;
+    #else
+      int my_errno;
+      #define SYS_ERRNO  my_errno
+      #define SYS_INLINE inline
+      #undef  SYS_LINUX_SYSCALL_SUPPORT_H
+      #define SYS_PREFIX 0
+      #include "linux_syscall_support.h"
+    #endif
   
     const unsigned char *buf = (const unsigned char*)void_buf;
     size_t len = bytes;
@@ -297,7 +335,7 @@ static ssize_t c_write(int f, const void *void_buf, size_t bytes, int *errno_){
       ssize_t rc;
       MY_NO_INTR(rc = sys0_write(f, buf, len));
       if (rc < 0) {
-        *errno_ = my_errno;
+        *errno_ = ERRNO;
         return rc;
       } else if (rc == 0) {
         break;
@@ -387,7 +425,7 @@ static ssize_t PipeWriter(void *f, const void *void_buf, size_t bytes) {
         if (l > fds->max_length) {
           l = fds->max_length;
         }
-        NO_INTR(rc = read(fds->compressed_fd, scratch, l));
+        NO_INTR(rc = sys_read(fds->compressed_fd, scratch, l));
         if (rc < 0) {
           /* The file handle is set to be non-blocking, so we loop until
            * read() returns -1.
@@ -412,7 +450,7 @@ static ssize_t PipeWriter(void *f, const void *void_buf, size_t bytes) {
       /* The compressor has consumed all previous data and is ready to
        * receive more.
        */
-      NO_INTR(rc = write(fds->write_fd, buf, len));
+      NO_INTR(rc = sys_write(fds->write_fd, buf, len));
       if (rc < 0 && errno != EAGAIN) {
         return -1;
       }
@@ -550,7 +588,7 @@ static inline int sex() {
 static int CreateElfCore(void *handle,
                          ssize_t (*writer)(void *, const void *, size_t),
                          int (*is_done)(void *), prpsinfo *prpsinfo,
-                         user *user, prstatus *prstatus, int num_threads,
+                         core_user *user, prstatus *prstatus, int num_threads,
                          pid_t *pids, regs *regs, fpregs *fpregs,
                          fpxregs *fpxregs, size_t pagesize) {
   /* Count the number of mappings in "/proc/self/maps". We are guaranteed
@@ -709,7 +747,7 @@ static int CreateElfCore(void *handle,
           Phdr   phdr;
           size_t offset   = sizeof(Ehdr) + (num_mappings + 1)*sizeof(Phdr);
           size_t filesz   = sizeof(Nhdr) + 4 + sizeof(struct prpsinfo) +
-                    (user ? sizeof(Nhdr) + 4 + sizeof(struct user) : 0) +
+                    (user ? sizeof(Nhdr) + 4 + sizeof(struct core_user) : 0) +
                             num_threads*(
                             + sizeof(Nhdr) + 4 + sizeof(struct prstatus)
                             + sizeof(Nhdr) + 4 + sizeof(struct fpregs));
@@ -768,12 +806,12 @@ static int CreateElfCore(void *handle,
             goto done;
           }
           if (user) {
-            nhdr.n_descsz   = sizeof(struct user);
+            nhdr.n_descsz   = sizeof(struct core_user);
             nhdr.n_type     = NT_PRXREG;
             if (writer(handle, &nhdr, sizeof(Nhdr)) != sizeof(Nhdr) ||
                 writer(handle, "CORE", 4) != 4 ||
-                writer(handle, user, sizeof(struct user))
-                !=sizeof(struct user)) {
+                writer(handle, user, sizeof(struct core_user))
+                !=sizeof(struct core_user)) {
               goto done;
             }
           }
@@ -867,16 +905,26 @@ struct CreateArgs {
 };
 
 static int CreatePipelineChild(void *void_arg) {
-  int my_errno;
   /* scope */ {
     /* Define a private copy of syscall macros, which does not modify the
      * global copy of errno.
      */
-    #define SYS_ERRNO my_errno
-    #define SYS_INLINE inline
-    #undef  SYS_LINUX_SYSCALL_SUPPORT_H
-    #define SYS_PREFIX 0
-    #include "linux_syscall_support.h"
+    #ifdef __cplusplus
+      #define sys0_close  sys.close
+      #define sys0_dup    sys.dup
+      #define sys0_dup2   sys.dup2
+      #define sys0_execve sys.execve
+      #define sys0_open   sys.open
+      #define sys0_fcntl  sys.fcntl
+      SysCalls sys;
+    #else
+      int my_errno;
+      #define SYS_ERRNO   my_errno
+      #define SYS_INLINE  inline
+      #define SYS_PREFIX  0
+      #undef  SYS_LINUX_SYSCALL_SUPPORT_H
+      #include "linux_syscall_support.h"
+    #endif
   
     struct CreateArgs *args = (struct CreateArgs *)void_arg;
     int i;
@@ -932,7 +980,7 @@ static int CreatePipelineChild(void *void_arg) {
        * going to die soon; thus, the compressor will be reaped by "init".
        */
       c_write(args->fds[1], &args->compressors, sizeof(&args->compressors),
-              &my_errno);
+              &ERRNO);
       if (strchr(compressor, '/')) {
         /* Absolute or relative path precedes name of executable             */
         sys0_execve(compressor, cmd_args, (const char * const *)environ);
@@ -965,7 +1013,7 @@ static int CreatePipelineChild(void *void_arg) {
   
     /* No suitable compressor found. Tell parent about it.                   */
     c_write(args->fds[1], &args->compressors, sizeof(&args->compressors),
-            &my_errno);
+            &ERRNO);
     MY_NO_INTR(sys0_close(args->fds[1]));
     sys__exit(0);
     return 0;
@@ -980,6 +1028,8 @@ static int CreatePipelineChild(void *void_arg) {
  */
 static int CreatePipeline(int *fds, int openmax, const char *PATH,
                           const struct CoredumperCompressor** compressors) {
+  int saved_errno1 = 0;
+
   /* Create a pipe for communicating between processes                       */
   if (sys_pipe(fds) < 0)
     return -1;
@@ -1046,7 +1096,7 @@ static int CreatePipeline(int *fds, int openmax, const char *PATH,
      * did not find any compressor that could be executed.
      */
     if (*compressors == NULL || (*compressors)->compressor == NULL) {
-      int saved_errno1 = errno;
+      saved_errno1 = errno;
       NO_INTR(sys_close(args.zip_out[0]));
       NO_INTR(sys_close(args.zip_out[1]));
       errno = saved_errno1;
@@ -1158,19 +1208,19 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
                         const char *PATH,
                         const struct CoredumperCompressor *compressors,
                         const struct CoredumperCompressor **selected_comp */) {
-  long          i;
-  int           rc = -1, fd = -1, threads = num_threads, hasSSE = 1;
-  struct user   user, *puser = &user;
-  prpsinfo      prpsinfo;
-  prstatus      prstatus;
-  regs          thread_regs[threads];
-  fpregs        thread_fpregs[threads];
-  fpxregs       thread_fpxregs[threads];
-  int           pair[2];
-  int           main_pid = ((Frame *)frame)->tid;
+  long             i;
+  int              rc = -1, fd = -1, threads = num_threads, hasSSE = 1;
+  struct core_user user, *puser = &user;
+  prpsinfo         prpsinfo;
+  prstatus         prstatus;
+  regs             thread_regs[threads];
+  fpregs           thread_fpregs[threads];
+  fpxregs          thread_fpxregs[threads];
+  int              pair[2];
+  int              main_pid = ((Frame *)frame)->tid;
 
   /* Get thread status                                                       */
-  memset(puser,          0, sizeof(struct user));
+  memset(puser,          0, sizeof(struct core_user));
   memset(thread_regs,    0, threads * sizeof(struct regs));
   memset(thread_fpregs,  0, threads * sizeof(struct fpregs));
   memset(thread_fpxregs, 0, threads * sizeof(struct fpxregs));
@@ -1186,7 +1236,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
      * structures that get written to the core file, either. We use a lookup
      * table to do the mapping.
      * Incidentally, this also means that on MIPS we cannot use
-     * PTRACE_PEEKUSER to fill "struct user". There just is no such thing
+     * PTRACE_PEEKUSER to fill "struct core_user". There just is no such thing
      * as a NT_PRXREG in our MIPS core files.
      */
     static const int map[sizeof(struct regs)/sizeof(long)] = {
@@ -1272,7 +1322,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
   /* Get parent's CPU registers, and user data structure                 */
   {
     #ifndef mips
-    for (i = 0; i < sizeof(struct user)/sizeof(int); i++)
+    for (i = 0; i < sizeof(struct core_user)/sizeof(int); i++)
       sys_ptrace(PTRACE_PEEKUSER, pids[0], (void *)(i*sizeof(int)),
                  ((char *)&user) + i*sizeof(int));
     memcpy(&user.regs, thread_regs, sizeof(struct regs));
@@ -1511,12 +1561,12 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
         }
 
         /* In the parent                                                     */
-        sys_sigprocmask(SIG_SETMASK, &old_signals, (void *)0);
+        sys_sigprocmask(SIG_SETMASK, &old_signals, (sigset_t *)0);
         NO_INTR(sys_close(pair[1]));
         
         /* Get pipe file handle from child                                   */
         /* scope */ {
-          void *buffer[1];
+          const struct CoredumperCompressor *buffer[1];
           char cmsg_buf[CMSG_SPACE(sizeof(int))];
           struct iovec  iov;
           struct msghdr msg;
@@ -1683,4 +1733,8 @@ error:
   ResumeAllProcessThreads(threads, pids);
   return -1;
 }
+
+#ifdef __cplusplus
+}
+#endif
 #endif

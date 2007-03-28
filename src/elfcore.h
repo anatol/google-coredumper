@@ -33,6 +33,9 @@
 
 #ifndef _ELFCORE_H
 #define _ELFCORE_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /* We currently only support x86-32, x86-64, ARM, and MIPS on Linux.
  * Porting to other related platforms should not be difficult.
@@ -375,4 +378,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *thread_pids,
 
 #endif
 
+#ifdef __cplusplus
+}
+#endif
 #endif /* _ELFCORE_H */

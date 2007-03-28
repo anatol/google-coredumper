@@ -34,8 +34,10 @@
 #include "linuxthreads.h"
 
 #ifdef THREADS
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-#include <fcntl.h>
 #include <asm/stat.h>
 #include <sched.h>
 #include <signal.h>
@@ -44,6 +46,7 @@
 #include <sys/socket.h>
 #include <sys/wait.h>
 
+#include <asm/fcntl.h>
 #include <asm/posix_types.h>
 #include <asm/types.h>
 #include <linux/dirent.h>
@@ -134,6 +137,31 @@ static int local_atoi(const char *s) {
 /* Re-runs fn until it doesn't cause EINTR
  */
 #define NO_INTR(fn)   do {} while ((fn) < 0 && errno == EINTR)
+
+
+/* Wrap a class around system calls, in order to give us access to
+ * a private copy of errno. This only works in C++, but it has the
+ * advantage of not needing nested functions, which are a non-standard
+ * language extension.
+ */
+#ifdef __cplusplus
+namespace {
+  class SysCalls {
+   public:
+    #define SYS_CPLUSPLUS
+    #define SYS_ERRNO     my_errno
+    #define SYS_INLINE    inline
+    #define SYS_PREFIX    -1
+    #undef  SYS_LINUX_SYSCALL_SUPPORT_H
+    #include "linux_syscall_support.h"
+    SysCalls() : my_errno(0) { }
+    int my_errno;
+  };
+}
+#define ERRNO sys.my_errno
+#else
+#define ERRNO my_errno
+#endif
 
 
 /* Wrapper for open() which is guaranteed to never return EINTR.
@@ -273,7 +301,7 @@ static void ListerThread(struct ListerParams *args) {
   altstack.ss_sp    = args->altstack_mem;
   altstack.ss_flags = 0;
   altstack.ss_size  = ALT_STACKSIZE;
-  sys_sigaltstack(&altstack, (void *)NULL);
+  sys_sigaltstack(&altstack, (const stack_t *)NULL);
 
   /* Some kernels forget to wake up traced processes, when the
    * tracer dies.  So, intercept synchronous signals and make sure
@@ -289,7 +317,7 @@ static void ListerThread(struct ListerParams *args) {
     sa.sa_sigaction = SignalHandler;
     sigfillset(&sa.sa_mask);
     sa.sa_flags     = SA_ONSTACK|SA_SIGINFO|SA_RESETHAND;
-    sys_sigaction(sync_signals[sig], &sa, (void *)NULL);
+    sys_sigaction(sync_signals[sig], &sa, (struct sigaction *)NULL);
   }
   
   /* Read process directories in /proc/...                                   */
@@ -411,7 +439,7 @@ static void ListerThread(struct ListerParams *args) {
                   sig_num_threads = num_threads;
                   goto next_entry;
                 }
-                while (sys_waitpid(pid, (void *)0, __WALL) < 0) {
+                while (sys_waitpid(pid, (int *)0, __WALL) < 0) {
                   if (errno != EINTR) {
                     sys_ptrace_detach(pid);
                     num_threads--;
@@ -511,7 +539,7 @@ int ListAllProcessThreads(void *parameter,
   char                altstack_mem[ALT_STACKSIZE];
   struct ListerParams args;
   pid_t               clone_pid;
-  int                 dumpable = 1, sig, my_errno;
+  int                 dumpable = 1, sig;
   sigset_t            sig_blocked, sig_old;
 
   va_start(args.ap, callback);
@@ -561,11 +589,18 @@ int ListAllProcessThreads(void *parameter,
      * (in our case, the parent) uses modified syscall macros that update
      * a local copy of errno, instead.
      */
-    #define SYS_ERRNO my_errno
-    #define SYS_INLINE inline
-    #undef  SYS_LINUX_SYSCALL_SUPPORT_H
-    #define SYS_PREFIX 0
-    #include "linux_syscall_support.h"
+    #ifdef __cplusplus
+      #define sys0_sigprocmask sys.sigprocmask
+      #define sys0_waitpid     sys.waitpid
+      SysCalls sys;
+    #else
+      int my_errno;
+      #define SYS_ERRNO        my_errno
+      #define SYS_INLINE       inline
+      #define SYS_PREFIX       0
+      #undef  SYS_LINUX_SYSCALL_SUPPORT_H
+      #include "linux_syscall_support.h"
+    #endif
   
     int clone_errno;
     clone_pid = local_clone((int (*)(void *))ListerThread, &args);
@@ -576,11 +611,11 @@ int ListAllProcessThreads(void *parameter,
     if (clone_pid >= 0) {
       int status, rc;
       while ((rc = sys0_waitpid(clone_pid, &status, __WALL)) < 0 &&
-             my_errno == EINTR) {
+             ERRNO == EINTR) {
              /* Keep waiting                                                 */
       }
       if (rc < 0) {
-        args.err = my_errno;
+        args.err = ERRNO;
         args.result = -1;
       } else if (WIFEXITED(status)) {
         switch (WEXITSTATUS(status)) {
@@ -629,4 +664,7 @@ int ResumeAllProcessThreads(int num_threads, pid_t *thread_pids) {
   return detached_at_least_one;
 }
 
+#ifdef __cplusplus
+}
+#endif
 #endif
