@@ -60,3 +60,17 @@ Tue Feb 20 15:07:03 2007  Google Inc. <opensource@google.com>
 	* dump anonymous executable mappins such as the [vdso] segment.
 	This helps "gdb" in following call chains past the invocation of
 	signal handlers.
+
+Fri Jan 25 18:36:01 2008  Google Inc. <opensource@google.com>
+
+	* Added kernel data structures to linux_syscall_support.h
+	* Added some more system calls
+	* General clean ups and minor bug fixes to linux_syscall_support.h
+	* Updated MIPS support
+	* Added PPC support to linux_syscall_support.h (based on the patch at
+	  http://google-perftools.googlegroups.com/web/google-perftools-0.94.1.ppc.patch?gda=k9bft1IAAACubrlYz6X6f2r_QSIc5WKIP3FyvVAXIQ9N70rJj7w7MWG1qiJ7UbTIup-M2XPURDR0OdCHCKqS2f7o1Lzcc8Kg4jvJEVA5r4WYNVZfjSxuln7gCK2zepjMSjyreBgvHJk)
+	  This does not mean that the coredumper works on PPC, yet. That still
+	  requires additional work
+	* Added linux_syscall_support_unittest.cc
+	* Updated other files as needed so that they would work with the
+	  changes made to linux_syscall_support.h
