@@ -1,4 +1,4 @@
-/* Copyright (c) 2005-2007, Google Inc.
+/* Copyright (c) 2005-2008, Google Inc.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -124,7 +124,7 @@ extern "C" {
     unsigned int   init_flag;
   } fpregs;
   #define regs arm_regs         /* General purpose registers                 */
-#elif defined(mips)
+#elif defined(__mips__)
   typedef struct fpxregs {      /* No extended FPU registers on MIPS         */
   } fpxregs;
   typedef struct fpregs {
@@ -172,7 +172,7 @@ typedef struct prpsinfo {       /* Information about process                 */
   unsigned char  pr_zomb;       /* Zombie                                    */
   signed char    pr_nice;       /* Nice val                                  */
   unsigned long  pr_flag;       /* Flags                                     */
-#if defined(__x86_64__) || defined(mips)
+#if defined(__x86_64__) || defined(__mips__)
   uint32_t       pr_uid;        /* User ID                                   */
   uint32_t       pr_gid;        /* Group ID                                  */
 #else
@@ -189,7 +189,7 @@ typedef struct prpsinfo {       /* Information about process                 */
 
 
 typedef struct core_user {      /* Ptrace returns this data for thread state */
-#ifndef mips
+#ifndef __mips__
   struct regs    regs;          /* CPU registers                             */
   unsigned long  fpvalid;       /* True if math co-processor being used      */
 #if defined(__i386__) || defined(__x86_64__)
@@ -241,7 +241,7 @@ typedef struct core_user {      /* Ptrace returns this data for thread state */
   #define ELF_ARCH  EM_386
 #elif defined(__ARM_ARCH_3__)
   #define ELF_ARCH  EM_ARM
-#elif defined(mips)
+#elif defined(__mips__)
   #define ELF_ARCH  EM_MIPS
 #endif
 
@@ -408,8 +408,8 @@ static ssize_t PipeWriter(void *f, const void *void_buf, size_t bytes) {
   size_t len               = bytes;
   while (fds->max_length > 0 && len > 0) {
     ssize_t rc;
-    struct pollfd pfd[2]   = { { fds->compressed_fd, POLLIN, 0 },
-                               { fds->write_fd, POLLOUT, 0 } };
+    struct kernel_pollfd pfd[2]   = { { fds->compressed_fd, POLLIN, 0 },
+                                      { fds->write_fd, POLLOUT, 0 } };
     int nfds = sys_poll(pfd, 2, -1);
     
     if (nfds < 0) {
@@ -425,6 +425,10 @@ static ssize_t PipeWriter(void *f, const void *void_buf, size_t bytes) {
         if (l > fds->max_length) {
           l = fds->max_length;
         }
+
+	/* The following line is needed on MIPS. Not sure why. Compiler bug? */
+	errno = -1;
+
         NO_INTR(rc = sys_read(fds->compressed_fd, scratch, l));
         if (rc < 0) {
           /* The file handle is set to be non-blocking, so we loop until
@@ -476,7 +480,7 @@ static int FlushPipe(struct WriterFds *fds) {
       l = fds->max_length;
     }
     if (l > 0) {
-      NO_INTR(rc = read(fds->compressed_fd, scratch, l));
+      NO_INTR(rc = sys_read(fds->compressed_fd, scratch, l));
       if (rc < 0) {
         return -1;
       } else if (rc == 0) {
@@ -490,6 +494,7 @@ static int FlushPipe(struct WriterFds *fds) {
   }
   return 0;
 }
+
 
 struct io {
   int fd;
@@ -1229,7 +1234,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
 #ifdef THREADS
   for (i = 0; i < threads; i++) {
     char scratch[4096];
-    #ifdef mips
+    #ifdef __mips__
     /* MIPS kernels do not support PTRACE_GETREGS, instead we have to call
      * PTRACE_PEEKUSER go retrieve individual CPU registers. The indices
      * for these registers do not exactly match with the order in the
@@ -1242,7 +1247,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
     static const int map[sizeof(struct regs)/sizeof(long)] = {
       -1, -1, -1, -1, -1, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,
       14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
-      -1, 68, 67, 66, 65, 64, -1 };
+      67, 68, 64, 66, 69, 65, -1 };
     int j;
     memset(thread_regs + i, 0, sizeof(struct regs));
     for (j = 0; j < sizeof(struct regs)/sizeof(long); j++) {
@@ -1321,7 +1326,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
 
   /* Get parent's CPU registers, and user data structure                 */
   {
-    #ifndef mips
+    #ifndef __mips__
     for (i = 0; i < sizeof(struct core_user)/sizeof(int); i++)
       sys_ptrace(PTRACE_PEEKUSER, pids[0], (void *)(i*sizeof(int)),
                  ((char *)&user) + i*sizeof(int));
@@ -1433,7 +1438,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
   /* scope */ {
     int openmax  = sys_sysconf(_SC_OPEN_MAX);
     int pagesize = sys_sysconf(_SC_PAGESIZE);
-    sigset_t old_signals, blocked_signals;
+    struct kernel_sigset_t old_signals, blocked_signals;
 
     const char *file_name =
       va_arg(ap, const char *);
@@ -1478,7 +1483,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
          * Also, POSIX claims that this should not actually be
          * necessarily, but reality says otherwise.
          */
-        sigfillset(&blocked_signals);
+        sys_sigfillset(&blocked_signals);
         sys_sigprocmask(SIG_BLOCK, &blocked_signals, &old_signals);
         
         /* Create a new core dump in child process; call sys_fork() in order to
@@ -1499,9 +1504,9 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
           /* Pass file handle to parent                                      */
           /* scope */ {
             char cmsg_buf[CMSG_SPACE(sizeof(int))];
-            struct iovec  iov;
-            struct msghdr msg;
-            struct cmsghdr *cmsg;
+            struct kernel_iovec  iov;
+            struct kernel_msghdr msg;
+            struct cmsghdr       *cmsg;
             memset(&iov, 0, sizeof(iov));
             memset(&msg, 0, sizeof(msg));
             iov.iov_base            = (void *)&compressors;
@@ -1561,15 +1566,15 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
         }
 
         /* In the parent                                                     */
-        sys_sigprocmask(SIG_SETMASK, &old_signals, (sigset_t *)0);
+        sys_sigprocmask(SIG_SETMASK, &old_signals, (struct kernel_sigset_t*)0);
         NO_INTR(sys_close(pair[1]));
         
         /* Get pipe file handle from child                                   */
         /* scope */ {
           const struct CoredumperCompressor *buffer[1];
           char cmsg_buf[CMSG_SPACE(sizeof(int))];
-          struct iovec  iov;
-          struct msghdr msg;
+          struct kernel_iovec  iov;
+          struct kernel_msghdr msg;
           for (;;) {
             int nbytes;
             memset(&iov, 0, sizeof(iov));

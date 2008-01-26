@@ -57,10 +57,12 @@ libcoredumper_la_SOURCES = src/coredumper.c \
                            $(LIBCOREDUMPER_INCLUDES)
 libcoredumper_la_LDFLAGS  = -export-symbols $(top_srcdir)/src/libcoredumper.sym
 
-TESTS += coredumper_unittest
+TESTS += coredumper_unittest linux_syscall_support_unittest
 COREDUMP_UNITTEST_INCLUDES = src/google/coredumper.h
 coredumper_unittest_SOURCES = src/coredumper_unittest.c
 coredumper_unittest_LDADD = libcoredumper.la -lpthread
+LINUX_SYSCALL_SUPPORT_INCLUDES = src/linux_syscall_support.h
+linux_syscall_support_unittest_SOURCES = src/linux_syscall_support_unittest.cc
 
 ## ^^^^ END OF RULES TO MAKE THE LIBRARIES, BINARIES, AND UNITTESTS
 

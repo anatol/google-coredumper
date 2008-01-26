@@ -1,4 +1,4 @@
-/* Copyright (c) 2005-2007, Google Inc.
+/* Copyright (c) 2005-2008, Google Inc.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -49,6 +49,11 @@
 #include "google/coredumper.h"
 #include "linuxthreads.h"
 
+/* Make assertion failures print more readable messages                      */
+#undef strcmp
+#undef strncmp
+#undef strstr
+
 /* Simple signal handler for dealing with timeouts.                          */
 static jmp_buf jmpenv;
 static void TimeOutHandler(int sig, siginfo_t *info, void *p) {
@@ -91,7 +96,10 @@ static void CheckWithReadElf(FILE *input, FILE *output, const char *filename,
                                "no relocations in this file",
                                "no unwind sections in this file",
                                "No version information found in this file",
-                               "NT_PRPSINFO", "NT_TASKSTRUCT",
+                               "NT_PRPSINFO",
+#ifndef __mips__
+                               "NT_TASKSTRUCT",
+#endif
                                "NT_PRSTATUS", "NT_FPREGSET",
 #ifdef THREADS
                                "NT_PRSTATUS", "NT_FPREGSET",
@@ -139,7 +147,7 @@ static void CheckWithGDB(FILE *input, FILE *output, const char *filename,
   struct sigaction sa;
 
 #if defined(__i386__) || defined(__x86_64) || defined(__ARM_ARCH_3__) || \
-    defined(mips)
+    defined(__mips__)
   /* If we have a platform-specific FRAME() macro, we expect the stack trace
    * to be unrolled all the way to WriteCoreDump().
    */
@@ -225,7 +233,7 @@ static void CheckWithGDB(FILE *input, FILE *output, const char *filename,
         assert(strncmp(buffer, "DONE", 4));
 
         /* Read the next message from gdb.                                   */
-        alarm(4);
+        alarm(20);
         line = fgets(buffer, sizeof(buffer), output);
         alarm(0);
         assert(line);

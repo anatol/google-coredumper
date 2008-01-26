@@ -14,6 +14,9 @@ AM_CONFIG_HEADER(src/config.h)
 
 # Checks for programs.
 AC_PROG_CC
+# This is only needed for linux_syscall_support_unittest, which itself
+# only needs c++ for some namespace issues.
+AC_PROG_CXX
 AC_PROG_INSTALL
 
 AC_PROG_LIBTOOL
