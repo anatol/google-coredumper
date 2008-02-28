@@ -127,7 +127,7 @@ static void CheckStructures() {
 #define ZERO_SIGACT { { 0 } }
 #endif
 
-static void SigHandler(int signum, struct siginfo *si, void *arg) {
+static void SigHandler(int signum) {
   if (signaled) {
     // Caller will report an error, as we cannot do so from a signal handler
     signaled = -1;
@@ -137,43 +137,50 @@ static void SigHandler(int signum, struct siginfo *si, void *arg) {
   return;
 }
 
+static void SigAction(int signum, struct siginfo *si, void *arg) {
+  SigHandler(signum);
+}
+
 static void Sigaction() {
   puts("Sigaction...");
   int signum       = SIGPWR;
-  signaled         = 0;
-  struct kernel_sigaction sa = ZERO_SIGACT, old, orig;
-  CHECK(!sys_sigaction(signum, NULL, &orig));
-  sa.sa_sigaction_ = SigHandler;
-  sa.sa_flags      = SA_RESETHAND | SA_RESTART | SA_SIGINFO;
-  #if defined(__i386__) || defined(__x86_64__)
-  sa.sa_flags     |= SA_RESTORER;
-  sa.sa_restorer   = sys_restore_rt();
-  #endif
-  CHECK(!sys_sigemptyset(&sa.sa_mask));
-  CHECK(!sys_sigaction(signum, &sa, &old));
-  CHECK(!memcmp(&old, &orig, sizeof(struct kernel_sigaction)));
-  CHECK(!sys_sigaction(signum, NULL, &old));
-  #if defined(__i386__) || defined(__x86_64__)
-  old.sa_restorer  = sa.sa_restorer;
-  #endif
-  CHECK(!memcmp(&old, &sa, sizeof(struct kernel_sigaction)));
-  struct kernel_sigset_t pending;
-  CHECK(!sys_sigpending(&pending));
-  CHECK(!sys_sigismember(&pending, signum));
-  struct kernel_sigset_t mask, oldmask;
-  CHECK(!sys_sigemptyset(&mask));
-  CHECK(!sys_sigaddset(&mask, signum));
-  CHECK(!sys_sigprocmask(SIG_BLOCK, &mask, &oldmask));
-  CHECK(!sys_kill(sys_getpid(), signum));
-  CHECK(!sys_sigpending(&pending));
-  CHECK(sys_sigismember(&pending, signum));
-  CHECK(!signaled);
-  CHECK(!sys_sigfillset(&mask));
-  CHECK(!sys_sigdelset(&mask, signum));
-  CHECK(sys_sigsuspend(&mask) == -1);
-  CHECK(signaled == signum);
-  CHECK(!sys_sigaction(signum, &orig, NULL));
-  CHECK(!sys_sigprocmask(SIG_SETMASK, &oldmask, NULL));
+  for (int info = 0; info < 2; info++) {
+    signaled         = 0;
+    struct kernel_sigaction sa = ZERO_SIGACT, old, orig;
+    CHECK(!sys_sigaction(signum, NULL, &orig));
+    if (info) {
+      sa.sa_sigaction_ = SigAction;
+    } else {
+      sa.sa_handler_   = SigHandler;
+    }
+    sa.sa_flags      = SA_RESETHAND | SA_RESTART | (info ? SA_SIGINFO : 0);
+    CHECK(!sys_sigemptyset(&sa.sa_mask));
+    CHECK(!sys_sigaction(signum, &sa, &old));
+    CHECK(!memcmp(&old, &orig, sizeof(struct kernel_sigaction)));
+    CHECK(!sys_sigaction(signum, NULL, &old));
+    #if defined(__i386__) || defined(__x86_64__)
+    old.sa_restorer  = sa.sa_restorer;
+    old.sa_flags    &= ~SA_RESTORER;
+    #endif
+    CHECK(!memcmp(&old, &sa, sizeof(struct kernel_sigaction)));
+    struct kernel_sigset_t pending;
+    CHECK(!sys_sigpending(&pending));
+    CHECK(!sys_sigismember(&pending, signum));
+    struct kernel_sigset_t mask, oldmask;
+    CHECK(!sys_sigemptyset(&mask));
+    CHECK(!sys_sigaddset(&mask, signum));
+    CHECK(!sys_sigprocmask(SIG_BLOCK, &mask, &oldmask));
+    CHECK(!sys_kill(sys_getpid(), signum));
+    CHECK(!sys_sigpending(&pending));
+    CHECK(sys_sigismember(&pending, signum));
+    CHECK(!signaled);
+    CHECK(!sys_sigfillset(&mask));
+    CHECK(!sys_sigdelset(&mask, signum));
+    CHECK(sys_sigsuspend(&mask) == -1);
+    CHECK(signaled == signum);
+    CHECK(!sys_sigaction(signum, &orig, NULL));
+    CHECK(!sys_sigprocmask(SIG_SETMASK, &oldmask, NULL));
+  }
 }
 
 static void OldSigaction() {
@@ -181,38 +188,44 @@ static void OldSigaction() {
    (defined(__mips__) && _MIPS_SIM == _MIPS_SIM_ABI32)
   puts("OldSigaction...");
   int signum       = SIGPWR;
-  signaled         = 0;
-  struct kernel_old_sigaction sa = ZERO_SIGACT, old, orig;
-  CHECK(!sys__sigaction(signum, NULL, &orig));
-  sa.sa_sigaction_ = SigHandler;
-  sa.sa_flags      = SA_RESETHAND | SA_RESTART;
-  memset(&sa.sa_mask, 0, sizeof(sa.sa_mask));
-  CHECK(!sys__sigaction(signum, &sa, &old));
-  CHECK(!memcmp(&old, &orig, sizeof(struct kernel_old_sigaction)));
-  CHECK(!sys__sigaction(signum, NULL, &old));
-  #ifndef __mips__
-  old.sa_restorer  = sa.sa_restorer;
-  #endif
-  CHECK(!memcmp(&old, &sa, sizeof(struct kernel_old_sigaction)));
-  unsigned long pending;
-  CHECK(!sys__sigpending(&pending));
-  CHECK(!(pending & (1UL << (signum - 1))));
-  unsigned long mask, oldmask;
-  mask             = 1 << (signum - 1);
-  CHECK(!sys__sigprocmask(SIG_BLOCK, &mask, &oldmask));
-  CHECK(!sys_kill(sys_getpid(), signum));
-  CHECK(!sys__sigpending(&pending));
-  CHECK(pending & (1UL << (signum - 1)));
-  CHECK(!signaled);
-  mask             = ~mask;
-  CHECK(sys__sigsuspend(
-  #ifndef __PPC__
-                        &mask, 0, 
-  #endif
-                        mask) == -1);
-  CHECK(signaled == signum);
-  CHECK(!sys__sigaction(signum, &orig, NULL));
-  CHECK(!sys__sigprocmask(SIG_SETMASK, &oldmask, NULL));
+  for (int info = 0; info < 2; info++) {
+    signaled         = 0;
+    struct kernel_old_sigaction sa = ZERO_SIGACT, old, orig;
+    CHECK(!sys__sigaction(signum, NULL, &orig));
+    if (info) {
+      sa.sa_sigaction_ = SigAction;
+    } else {
+      sa.sa_handler_   = SigHandler;
+    }
+    sa.sa_flags      = SA_RESETHAND | SA_RESTART | (info ? SA_SIGINFO : 0);
+    memset(&sa.sa_mask, 0, sizeof(sa.sa_mask));
+    CHECK(!sys__sigaction(signum, &sa, &old));
+    CHECK(!memcmp(&old, &orig, sizeof(struct kernel_old_sigaction)));
+    CHECK(!sys__sigaction(signum, NULL, &old));
+    #ifndef __mips__
+    old.sa_restorer  = sa.sa_restorer;
+    #endif
+    CHECK(!memcmp(&old, &sa, sizeof(struct kernel_old_sigaction)));
+    unsigned long pending;
+    CHECK(!sys__sigpending(&pending));
+    CHECK(!(pending & (1UL << (signum - 1))));
+    unsigned long mask, oldmask;
+    mask             = 1 << (signum - 1);
+    CHECK(!sys__sigprocmask(SIG_BLOCK, &mask, &oldmask));
+    CHECK(!sys_kill(sys_getpid(), signum));
+    CHECK(!sys__sigpending(&pending));
+    CHECK(pending & (1UL << (signum - 1)));
+    CHECK(!signaled);
+    mask             = ~mask;
+    CHECK(sys__sigsuspend(
+    #ifndef __PPC__
+                          &mask, 0,
+    #endif
+                          mask) == -1);
+    CHECK(signaled == signum);
+    CHECK(!sys__sigaction(signum, &orig, NULL));
+    CHECK(!sys__sigprocmask(SIG_SETMASK, &oldmask, NULL));
+  }
 #endif
 }
 
