@@ -31,17 +31,35 @@ TESTS_ENVIRONMENT =
 noinst_SCRIPTS =
 
 # The manual pages that should be installed
-man3_MANS = man/GetCoreDump.man man/WriteCoreDump.man
+man3_MANS = man/GetCoreDump.man man/WriteCoreDump.man \
+            man/CoreDumpParameters.man
 
 install-data-hook:
 	ln -sf GetCoreDump.3 $(DESTDIR)$(man3dir)/GetCompressedCoreDump.3
+	ln -sf GetCoreDump.3 $(DESTDIR)$(man3dir)/GetCoreDumpWith.3
 	ln -sf WriteCoreDump.3 $(DESTDIR)$(man3dir)/WriteCompressedCoreDump.3
+	ln -sf WriteCoreDump.3 $(DESTDIR)$(man3dir)/WriteCoreDumpWith.3
 	ln -sf WriteCoreDump.3 $(DESTDIR)$(man3dir)/WriteCoreDumpLimited.3
+	ln -sf WriteCoreDump.3 $(DESTDIR)$(man3dir)/WriteCoreDumpLimitedByPriority.3
+	ln -sf CoreDumpParameters.3 $(DESTDIR)$(man3dir)/ClearCoreDumpParameters.3
+	ln -sf CoreDumpParameters.3 $(DESTDIR)$(man3dir)/SetCoreDumpLimited.3
+	ln -sf CoreDumpParameters.3 $(DESTDIR)$(man3dir)/SetCoreDumpCompressed.3
+	ln -sf CoreDumpParameters.3 $(DESTDIR)$(man3dir)/SetCoreDumpLimitedByPriority.3
+	ln -sf CoreDumpParameters.3 $(DESTDIR)$(man3dir)/SetCoreDumpNotes.3
+
 
 uninstall-hook:
 	rm -f $(DESTDIR)$(man3dir)/GetCompressedCoreDump.3
-	rm -f WriteCoreDump.3 $(DESTDIR)$(man3dir)/WriteCompressedCoreDump.3
-	rm -f WriteCoreDump.3 $(DESTDIR)$(man3dir)/WriteCoreDumpLimited.3
+	rm -f $(DESTDIR)$(man3dir)/GetCoreDumpWith.3
+	rm -f $(DESTDIR)$(man3dir)/WriteCoreDumpWith.3
+	rm -f $(DESTDIR)$(man3dir)/WriteCompressedCoreDump.3
+	rm -f $(DESTDIR)$(man3dir)/WriteCoreDumpLimited.3
+	rm -f $(DESTDIR)$(man3dir)/WriteCoreDumpLimitedByPriority.3
+	rm -f $(DESTDIR)$(man3dir)/ClearCoreDumpParameters.3
+	rm -f $(DESTDIR)$(man3dir)/SetCoreDumpLimited.3
+	rm -f $(DESTDIR)$(man3dir)/SetCoreDumpCompressed.3
+	rm -f $(DESTDIR)$(man3dir)/SetCoreDumpLimitedByPriority.3
+	rm -f $(DESTDIR)$(man3dir)/SetCoreDumpNotes.3
 
 ## vvvv RULES TO MAKE THE LIBRARIES, BINARIES, AND UNITTESTS
 
@@ -55,7 +73,8 @@ libcoredumper_la_SOURCES = src/coredumper.c \
                            src/elfcore.c \
                            src/linuxthreads.c \
                            $(LIBCOREDUMPER_INCLUDES)
-libcoredumper_la_LDFLAGS  = -export-symbols $(top_srcdir)/src/libcoredumper.sym
+libcoredumper_la_LDFLAGS = -export-symbols $(top_srcdir)/src/libcoredumper.sym \
+                           -version-info 1:0:0
 
 TESTS += coredumper_unittest linux_syscall_support_unittest
 COREDUMP_UNITTEST_INCLUDES = src/google/coredumper.h

@@ -1,7 +1,7 @@
 '\" t
 .TH GETCOREDUMP 3 "Feb 15, 2007"
 .SH NAME
-GetCoreDump, GetCompressedCoreDump \- creates a copy-on-write snapshot
+GetCoreDump, GetCompressedCoreDump, GetCoreDumpWith \- creates a copy-on-write snapshot
 of the current process
 .SH SYNOPSIS
 .ad l
@@ -9,16 +9,27 @@ of the current process
 .B "#include \*(lqgoogle/coredumper.h\*(rq"
 .PP
 .B int GetCoreDump(void);
+.PP
+.BI int\~Get\%Core\%Dump\%With(const\~struct\~Core\%Dump\%Parameters\~* params );
 .HP 26
 .BI int\~Get\%Compressed\%Core\%Dump(const\~struct\~Coredumper\%Compressor\ \:\
     compressors[] ,\ \:struct\~Coredumper\%Compressor\ \:** selected_compressor );
 .ad b
 .SH DESCRIPTION
 The \fBGetCoreDump\fP() function returns a file handle that can be
-read to obtain a snapshot of the current state of the calling process.
+read to obtain a snapshot of the current state of the calling process. This
+function is a convenience wrapper for \fBGetCoreDumpWith\fP() using the default
+parameters.
+.PP
+The \fBGetCoreDumpWith\fP() function returns a file handle that can be read
+to obtain a snapshot of the current state of the calling process using the
+parameters specified in the \fBCoreDumpParameters\fP structure. The
+parameters can specify any behaviour of the core dumper however the limiting
+values in the parameter will be ignored in this type of core dump.
 .PP
 The \fBGetCompressedCoreDump\fP() function returns a file handle to a
-core file that has been compressed on the fly. In
+core file that has been compressed on the fly. This function is a convenience
+wrapper for \fBGetCoreDumpWith\fP(). In
 .IR compressor ,
 the caller passes a pointer to an array of possible compressors:
 .sp
@@ -80,9 +91,9 @@ is non-NULL, it will be set to the actual
 .I CoredumperCompressor
 object used.
 .SH RETURN VALUE
-Both \fBGetCoreDump\fP(), and \fBGetCompressedCoreDump\fP() return a
-non-seekable file handle on success. The copy-on-write snapshot will
-automatically be released, when the caller \fBclose\fP()s this file
+\fBGetCoreDump\fP(), \fBGetCoreDumpWith\fP(), and \fBGetCompressedCoreDump\fP()
+all return a non-seekable file handle on success. The copy-on-write snapshot
+will automatically be released, when the caller \fBclose\fP()s this file
 handle.
 .PP
 On error \-1 will be returned and
@@ -113,6 +124,9 @@ from the \fBGetCoreDump\fP() or \fBWriteCoreDump\fP() family executing
 concurrently.
 .SH "SEE ALSO"
 .BR WriteCoreDump (3),
+.BR WriteCoreDumpWith (3),
 .BR WriteCoreDumpLimited (3),
+.BR WriteCoreDumpLimitedByPriority (3),
+.BR WriteCompressedCoreDump(3),
 and
-.BR WriteCompressedCoreDump(3).
+.BR CoreDumpParameters (3).

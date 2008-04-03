@@ -8,6 +8,14 @@ COREDUMPER_TRY_COMPRESS_COMPRESSED
 COREDUMPER_UNCOMPRESSED
 GetCoreDump
 GetCompressedCoreDump
+GetCoreDumpWith
 WriteCoreDump
+WriteCoreDumpWith
 WriteCoreDumpLimited
+WriteCoreDumpLimitedByPriority
 WriteCompressedCoreDump
+ClearCoreDumpParametersInternal
+SetCoreDumpCompressed
+SetCoreDumpLimited
+SetCoreDumpLimitedByPriority
+SetCoreDumpNotes

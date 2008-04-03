@@ -74,3 +74,17 @@ Fri Jan 25 18:36:01 2008  Google Inc. <opensource@google.com>
 	* Added linux_syscall_support_unittest.cc
 	* Updated other files as needed so that they would work with the
 	  changes made to linux_syscall_support.h
+
+Thu Apr  3 14:16:01 2008  Google Inc. <opensource@google.com>
+
+	* coredumper: version 1.2 release
+	* Added the option to prioritize smaller memory segments when limiting
+	core dumps.
+	* Added the option to add user defined notes into the core dump.
+	* Added a generalized system to be able to combine parameters easily.
+	* Increased the library version number to 1.0.0 since the interface has
+	been extended.
+	* Added vdso segments to the core dump.
+	* Made the failing thread's registers the first in the core file as
+	expected by gdb.
+

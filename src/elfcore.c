@@ -28,7 +28,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  * ---
- * Author: Markus Gutschke
+ * Author: Markus Gutschke, Carl Crous
  */
 
 #include "elfcore.h"
@@ -62,6 +62,21 @@ extern "C" {
 #define CLONE_UNTRACED 0x00800000
 #endif
 
+#ifndef AT_SYSINFO_EHDR
+#define AT_SYSINFO_EHDR 33
+#endif
+
+#ifndef O_LARGEFILE
+  #if defined(__mips__)
+    #define O_LARGEFILE 0x2000
+  #elif defined(__ARM_ARCH_3__)
+    #define O_LARGEFILE 0400000
+  #elif defined(__PPC__) || defined(__ppc__)
+    #define O_LARGEFILE 0200000
+  #else
+    #define O_LARGEFILE 00100000 /* generic                                  */
+  #endif
+#endif
 
 /* Data structures found in x86-32/64, ARM, and MIPS core dumps on Linux;
  * similar data structures are defined in /usr/include/{linux,asm}/... but
@@ -226,12 +241,14 @@ typedef struct core_user {      /* Ptrace returns this data for thread state */
   #define Phdr      Elf64_Phdr
   #define Shdr      Elf64_Shdr
   #define Nhdr      Elf64_Nhdr
+  #define auxv_t    Elf64_auxv_t
 #else
   #define ELF_CLASS ELFCLASS32
   #define Ehdr      Elf32_Ehdr
   #define Phdr      Elf32_Phdr
   #define Shdr      Elf32_Shdr
   #define Nhdr      Elf32_Nhdr
+  #define auxv_t    Elf32_auxv_t
 #endif
 
 
@@ -586,7 +603,131 @@ static inline int sex() {
 }
 
 
-/* This function is invoked from a seperate process. It has access to a
+static int WriteThreadRegs(void *handle,
+                           ssize_t (*writer)(void *, const void *, size_t),
+                           prstatus *prstatus, pid_t pid, 
+                           regs *regs, fpregs *fpregs, fpxregs *fpxregs) {
+  Nhdr nhdr;
+  memset(&nhdr, 0, sizeof(Nhdr));
+  /* Process status and integer registers                                    */
+  nhdr.n_namesz = 5;
+  nhdr.n_descsz = sizeof(struct prstatus);
+  nhdr.n_type   = NT_PRSTATUS;
+  prstatus->pr_pid = pid;
+  prstatus->pr_reg = *regs;
+  if (writer(handle, &nhdr, sizeof(Nhdr)) != sizeof(Nhdr) ||
+      writer(handle, "CORE\0\0\0\0", 8) != 8 ||
+      writer(handle, prstatus, sizeof(struct prstatus)) !=
+      sizeof(struct prstatus)) {
+    return -1;
+  }
+  
+  /* FPU registers                                                           */
+  nhdr.n_descsz = sizeof(struct fpregs);
+  nhdr.n_type   = NT_FPREGSET;
+  if (writer(handle, &nhdr, sizeof(Nhdr)) != sizeof(Nhdr) ||
+      writer(handle, "CORE\0\0\0\0", 8) != 8 ||
+      writer(handle, fpregs, sizeof(struct fpregs)) !=
+      sizeof(struct fpregs)) {
+    return -1;
+  }
+  
+  /* SSE registers                                                           */
+  #if defined(__i386__) && !defined( __x86_64__)
+  /* Linux on x86-64 stores all FPU registers in the SSE structure           */
+  if (fpxregs) {
+    nhdr.n_namesz = 8;
+    nhdr.n_descsz = sizeof(struct fpxregs);
+    nhdr.n_type   = NT_PRXFPREG;
+    if (writer(handle, &nhdr, sizeof(Nhdr)) != sizeof(Nhdr) ||
+        writer(handle, "LINUX\000\000", 8) != 8 ||
+        writer(handle, fpxregs, sizeof(struct fpxregs)) !=
+        sizeof(struct fpxregs)) {
+      return -1;
+    }
+  }
+  #endif
+  return 0;
+}
+
+/* Read /proc/self/auxv (if it exists), count number of entries.
+ * Since we are already reading all entries, it is convenient
+ * to also return the address of VDSO Elf header, if AT_SYSINFO_EHDR
+ * is present.
+ */
+static void CountAUXV(size_t *pnum_auxv, size_t *pvdso_ehdr) {
+  int fd;
+  auxv_t auxv;
+  size_t num_auxv = 0, vdso_ehdr = 0;
+  NO_INTR(fd = sys_open("/proc/self/auxv", O_RDONLY, 0));
+  if (fd >= 0) {
+    ssize_t nread;
+    do {
+      NO_INTR(nread = sys_read(fd, &auxv, sizeof(auxv_t)));
+      if (sizeof(auxv_t) != nread)
+        break;
+      num_auxv++;
+      if (auxv.a_type == AT_SYSINFO_EHDR) {
+        vdso_ehdr = (size_t)auxv.a_un.a_val;
+      }
+    } while (auxv.a_type != AT_NULL);
+  }
+  NO_INTR(sys_close(fd));
+  *pnum_auxv = num_auxv;
+  *pvdso_ehdr = vdso_ehdr;
+  return;
+}
+
+/* Verify that alleged vdso and its internals are sane (properly
+ * aligned, within readable memory etc. Returns NULL if not.
+ */
+static Ehdr *SanitizeVDSO(Ehdr *ehdr, size_t start, size_t end) {
+  const size_t ehdr_address = (size_t)ehdr; /* ehdr alias to avoid casts     */
+  int i;
+  Phdr *phdr;
+  if (!ehdr_address || (ehdr_address & (sizeof(size_t) - 1))) {
+    /* Not properly aligned. Something goofy is going on.                    */
+    return NULL;
+  }
+  if (end <= ehdr_address + sizeof(Ehdr)) {
+    /* Entire Ehdr is not "covered" by expected region.                      */
+    return NULL;
+  }
+  if (ehdr->e_phoff & (sizeof(size_t)-1)) {
+    /* Phdr not properly aligned                                             */
+    return NULL;
+  }
+  phdr = (Phdr*)(ehdr_address + ehdr->e_phoff);
+  if ((size_t)phdr <= start ||
+      end <= (size_t)(phdr + ehdr->e_phnum)) {
+    /* Phdr[] is not "covered" by expected region.                           */
+    return NULL;
+  }
+  if (phdr[0].p_type != PT_LOAD ||
+      phdr[0].p_vaddr != start ||
+      phdr[0].p_vaddr + phdr[0].p_memsz >= end) {
+    /* Something goofy.                                                      */
+    return NULL;
+  }
+  for (i = 1; i < ehdr->e_phnum; i++) {
+    if (phdr[i].p_type == PT_LOAD) {
+      /* Only a single PT_LOAD at index 0 is expected                        */
+      return NULL;
+    }
+    if (phdr[i].p_vaddr & (sizeof(size_t) - 1)) {
+      /* Phdr data not properly aligned                                      */
+      return NULL;
+    }
+    if (phdr[i].p_vaddr <= start ||
+        end <= phdr[i].p_vaddr + phdr[i].p_filesz) {
+      /* The data isn't in the expected range                                */
+      return NULL;
+    }
+  }
+  return ehdr;
+}
+
+/* This function is invoked from a separate process. It has access to a
  * copy-on-write copy of the parents address space, and all crucial
  * information about the parent has been computed by the caller.
  */
@@ -595,13 +736,18 @@ static int CreateElfCore(void *handle,
                          int (*is_done)(void *), prpsinfo *prpsinfo,
                          core_user *user, prstatus *prstatus, int num_threads,
                          pid_t *pids, regs *regs, fpregs *fpregs,
-                         fpxregs *fpxregs, size_t pagesize) {
+                         fpxregs *fpxregs, size_t pagesize,
+                         size_t prioritize_max_length, pid_t main_pid,
+                         const struct CoredumperNote *extra_notes,
+                         int extra_notes_count) {
   /* Count the number of mappings in "/proc/self/maps". We are guaranteed
    * that this number is not going to change while this function executes.
    */
   int       rc = -1, num_mappings = 0;
   struct io io;
   int       loopback[2] = { -1, -1 };
+  size_t    num_auxv;
+  union { Ehdr *ehdr; size_t address; } vdso;
 
   if (sys_pipe(loopback) < 0)
     goto done;
@@ -620,18 +766,20 @@ static int CreateElfCore(void *handle,
     }
     NO_INTR(sys_close(io.fd));
 
+    CountAUXV(&num_auxv, &vdso.address);
     /* Read all mappings. This requires re-opening "/proc/self/maps"         */
     /* scope */ {
       static const int PF_ANONYMOUS = 0x80000000;
       static const int PF_MASK      = 0x00000007;
       struct {
-        size_t start_address, end_address, offset;
+        size_t start_address, end_address, offset, write_size;
         int   flags;
       } mappings[num_mappings];
       io.data = io.end = 0;
       NO_INTR(io.fd = sys_open("/proc/self/maps", O_RDONLY, 0));
       if (io.fd >= 0) {
         size_t note_align;
+        size_t num_extra_phdrs = 0;
         /* Parse entries of the form:
          * "^[0-9A-F]*-[0-9A-F]* [r-][w-][x-][p-] [0-9A-F]*.*$"
          */
@@ -708,6 +856,14 @@ static int CreateElfCore(void *handle,
             mappings[i].start_address += zeros;
           }
 
+          /* Do not write contents for memory segments that are read-only    */
+          if ((mappings[i].flags & (PF_ANONYMOUS|PF_W)) == 0) {
+            mappings[i].write_size = 0;
+          } else {
+            mappings[i].write_size = mappings[i].end_address
+                                   - mappings[i].start_address;
+          }
+
           /* Remove mapping, if it was not readable, or completely zero
            * anyway. The former is usually the case of stack guard pages, and
            * the latter occasionally happens for unused memory.
@@ -723,9 +879,42 @@ static int CreateElfCore(void *handle,
         }
         NO_INTR(sys_close(io.fd));
 
+        if (vdso.address) {
+          /* Sanity checks.                                                  */
+          for (i = 0; i < num_mappings; i++) {
+            size_t start = mappings[i].start_address;
+            size_t end   = mappings[i].end_address;
+            if ((mappings[i].flags & PF_R) &&
+                start <= vdso.address && vdso.address < end) {
+              vdso.ehdr = SanitizeVDSO(vdso.ehdr, start, end);
+              break;
+            }
+          }
+          if (i == num_mappings) {
+            /* Did not find a mapping "covering" vdso.
+             * Something goofy is going on; will not dump it.
+             */
+            vdso.address = 0;
+          }
+        }
+
         /* Write out the ELF header                                          */
         /* scope */ {
           Ehdr ehdr;
+          if (vdso.address) {
+            /* We are going to add Phdrs that "belong" to vdso.
+             * This isn't strictly necessary, but matches what kernel code
+             * in fs/binfmt_elf.c does on platforms that have vdso.
+             */
+            Phdr *vdso_phdr = (Phdr *)(vdso.address + vdso.ehdr->e_phoff);
+            for (i = 0; i < vdso.ehdr->e_phnum; i++) {
+              if (vdso_phdr[i].p_type == PT_LOAD) {
+                /* This will be written as "normal" mapping                  */
+              } else {
+                num_extra_phdrs++;
+              }
+            }
+          }
           memset(&ehdr, 0, sizeof(Ehdr));
           ehdr.e_ident[0] = ELFMAG0;
           ehdr.e_ident[1] = ELFMAG1;
@@ -740,7 +929,7 @@ static int CreateElfCore(void *handle,
           ehdr.e_phoff    = sizeof(Ehdr);
           ehdr.e_ehsize   = sizeof(Ehdr);
           ehdr.e_phentsize= sizeof(Phdr);
-          ehdr.e_phnum    = num_mappings + 1;
+          ehdr.e_phnum    = num_mappings + num_extra_phdrs + 1;
           ehdr.e_shentsize= sizeof(Shdr);
           if (writer(handle, &ehdr, sizeof(Ehdr)) != sizeof(Ehdr)) {
             goto done;
@@ -750,18 +939,36 @@ static int CreateElfCore(void *handle,
         /* Write program headers, starting with the PT_NOTE entry            */
         /* scope */ {
           Phdr   phdr;
-          size_t offset   = sizeof(Ehdr) + (num_mappings + 1)*sizeof(Phdr);
-          size_t filesz   = sizeof(Nhdr) + 4 + sizeof(struct prpsinfo) +
-                    (user ? sizeof(Nhdr) + 4 + sizeof(struct core_user) : 0) +
+          size_t offset   = sizeof(Ehdr) + 
+                            (num_mappings + num_extra_phdrs + 1)*sizeof(Phdr);
+          size_t filesz   = sizeof(Nhdr) + 8 + sizeof(struct prpsinfo) +
+                    (user ? sizeof(Nhdr) + 8 + sizeof(struct core_user) : 0) +
                             num_threads*(
-                            + sizeof(Nhdr) + 4 + sizeof(struct prstatus)
-                            + sizeof(Nhdr) + 4 + sizeof(struct fpregs));
+                            + sizeof(Nhdr) + 8 + sizeof(struct prstatus)
+                            + sizeof(Nhdr) + 8 + sizeof(struct fpregs));
           #if defined(__i386__) && !defined(__x86_64__)
           if (fpxregs) {
             filesz       += num_threads*(
                              sizeof(Nhdr) + 8 + sizeof(struct fpxregs));
           }
           #endif
+          /* Calculate how much space the extra notes will take.             */
+          for (i = 0; i < extra_notes_count; i++) {
+            size_t name_size;
+            name_size = strlen(extra_notes[i].name) + 1;
+            filesz += sizeof(Nhdr) +
+              name_size + extra_notes[i].description_size;
+            /* Note names and descriptions are 4 byte aligned.               */
+            if (name_size % 4 != 0) {
+              filesz += 4 - name_size % 4;
+            }
+            if (extra_notes[i].description_size % 4 != 0) {
+              filesz += 4 - extra_notes[i].description_size % 4;
+            }
+          }
+          /* Space for auxv note                                             */
+          filesz += 8 + sizeof(Nhdr) + num_auxv*sizeof(auxv_t);
+
           memset(&phdr, 0, sizeof(Phdr));
           phdr.p_type     = PT_NOTE;
           phdr.p_offset   = offset;
@@ -778,6 +985,66 @@ static int CreateElfCore(void *handle,
           if (note_align == phdr.p_align)
             note_align    = 0;
           offset         += note_align;
+
+          /* If the option is set, remove the largest memory sections first
+           * when limiting the size of the core dump.
+           * If prioritize_max_length is zero, the prioritization option wasn't
+           * set. If max_length was set to zero, we wouldn't have gotten this
+           * far.
+           */
+          if (prioritize_max_length > 0) {
+            /* Calculates the size of the vdso sections which are added to the
+             * end of the file. These need to be preserved in order for the
+             * core file to be useful.
+             */
+            size_t vdso_size = 0;
+            if (vdso.address) {
+              Phdr *vdso_phdr = (Phdr*)(vdso.address + vdso.ehdr->e_phoff);
+              for (i = 0; i < vdso.ehdr->e_phnum; i++) {
+                Phdr *p = vdso_phdr+i;
+                if (p->p_type != PT_LOAD) {
+                   vdso_size += p->p_filesz;
+                }
+              }
+            }
+
+            /* Loops while there isn't enough space for all the mappings. Each
+             * iteration, the largest mapping will be reduced in size.
+             */
+            for (;;) {
+              int largest = -1;
+              size_t total_core_size = offset + filesz + vdso_size;
+              /* Get the largest and total size of the core dump.            */
+              for (i = 0; i < num_mappings; i++) {
+                total_core_size += mappings[i].write_size;
+                if (largest < 0 ||
+                    mappings[largest].write_size < mappings[i].write_size) {
+                  largest = i;
+                }
+              }
+              /* If the total size of all the maps is more than our file size,
+               * we must reduce the size of the largest map.
+               */
+              if (largest >= 0 && total_core_size > prioritize_max_length) {
+                size_t space_needed = total_core_size - prioritize_max_length;
+                /* If there is no more space to free in the mappings, we must
+                 * stop. The size limit will be preserved since if the
+                 * prioritized limiting is enabled, the limited writer will be
+                 * used.
+                 */
+                if (mappings[largest].write_size > 0) {
+                  if (space_needed > mappings[largest].write_size) {
+                    mappings[largest].write_size = 0;
+                    continue;
+                  } else {
+                    mappings[largest].write_size -= space_needed;
+                  }
+                }
+              }
+              break;
+            }
+          }
+
           for (i = 0; i < num_mappings; i++) {
             offset       += filesz;
             filesz        = mappings[i].end_address -mappings[i].start_address;
@@ -785,27 +1052,38 @@ static int CreateElfCore(void *handle,
             phdr.p_vaddr  = mappings[i].start_address;
             phdr.p_memsz  = filesz;
 
-            /* Do not write contents for memory segments that are read-only  */
-            if ((mappings[i].flags & (PF_ANONYMOUS|PF_W)) == 0) {
-              filesz      = 0;
-            }
+            filesz        = mappings[i].write_size;
             phdr.p_filesz = filesz;
             phdr.p_flags  = mappings[i].flags & PF_MASK;
             if (writer(handle, &phdr, sizeof(Phdr)) != sizeof(Phdr)) {
               goto done;
             }
           }
+          if (vdso.ehdr) {
+            Phdr *vdso_phdr = (Phdr*)(vdso.address + vdso.ehdr->e_phoff);
+            for (i = 0; i < vdso.ehdr->e_phnum; i++) {
+              if (vdso_phdr[i].p_type != PT_LOAD) {
+                memcpy(&phdr, vdso_phdr+i, sizeof(Phdr));
+                offset       += filesz;
+                filesz        = phdr.p_filesz;
+                phdr.p_offset = offset;
+                phdr.p_paddr  = 0; /* match other core phdrs                 */
+                if (writer(handle, &phdr, sizeof(Phdr)) != sizeof(Phdr)) {
+                  goto done;
+                }
+              }
+            }
+          }
         }
-
         /* Write note section                                                */
         /* scope */ {
           Nhdr nhdr;
           memset(&nhdr, 0, sizeof(Nhdr));
-          nhdr.n_namesz   = 4;
+          nhdr.n_namesz   = 5;
           nhdr.n_descsz   = sizeof(struct prpsinfo);
           nhdr.n_type     = NT_PRPSINFO;
           if (writer(handle, &nhdr, sizeof(Nhdr)) != sizeof(Nhdr) ||
-              writer(handle, "CORE", 4) != 4 ||
+              writer(handle, "CORE\0\0\0\0", 8) != 8 ||
               writer(handle, prpsinfo, sizeof(struct prpsinfo)) !=
               sizeof(struct prpsinfo)) {
             goto done;
@@ -814,52 +1092,101 @@ static int CreateElfCore(void *handle,
             nhdr.n_descsz   = sizeof(struct core_user);
             nhdr.n_type     = NT_PRXREG;
             if (writer(handle, &nhdr, sizeof(Nhdr)) != sizeof(Nhdr) ||
-                writer(handle, "CORE", 4) != 4 ||
+                writer(handle, "CORE\0\0\0\0", 8) != 8 ||
                 writer(handle, user, sizeof(struct core_user))
                 !=sizeof(struct core_user)) {
               goto done;
             }
           }
-
-          for (i = num_threads; i-- > 0; ) {
-            /* Process status and integer registers                          */
-            nhdr.n_descsz = sizeof(struct prstatus);
-            nhdr.n_type   = NT_PRSTATUS;
-            prstatus->pr_pid = pids[i];
-            prstatus->pr_reg = regs[i];
-            if (writer(handle, &nhdr, sizeof(Nhdr)) != sizeof(Nhdr) ||
-                writer(handle, "CORE", 4) != 4 ||
-                writer(handle, prstatus, sizeof(struct prstatus)) !=
-                sizeof(struct prstatus)) {
+          if (num_auxv) {
+            /* Dump entire auxv[] array as NT_AUXV note, to match what
+             * kernel code in fs/binfmt_elf.c does.
+             * Without this, gdb can't unwind through vdso on i686.
+             */
+            int fd, i;
+            NO_INTR(fd = sys_open("/proc/self/auxv", O_RDONLY, 0));
+            if (fd == -1) {
               goto done;
             }
-
-            /* FPU registers                                                 */
-            nhdr.n_descsz = sizeof(struct fpregs);
-            nhdr.n_type   = NT_FPREGSET;
+            nhdr.n_descsz = num_auxv * sizeof(auxv_t);
+            nhdr.n_type = NT_AUXV;
             if (writer(handle, &nhdr, sizeof(Nhdr)) != sizeof(Nhdr) ||
-                writer(handle, "CORE", 4) != 4 ||
-                writer(handle, fpregs+i, sizeof(struct fpregs)) !=
-                sizeof(struct fpregs)) {
+                writer(handle, "CORE\0\0\0\0", 8) != 8) {
+              NO_INTR(sys_close(fd));
               goto done;
             }
-
-            /* SSE registers                                                 */
-            #if defined(__i386__) && !defined( __x86_64__)
-            /* Linux on x86-64 stores all FPU registers in the SSE structure */
-            if (fpxregs) {
-              nhdr.n_namesz = 8;
-              nhdr.n_descsz = sizeof(struct fpxregs);
-              nhdr.n_type   = NT_PRXFPREG;
-              if (writer(handle, &nhdr, sizeof(Nhdr)) != sizeof(Nhdr) ||
-                  writer(handle, "LINUX\000\000", 8) != 8 ||
-                  writer(handle, fpxregs+i, sizeof(struct fpxregs)) !=
-                  sizeof(struct fpxregs)) {
+            for (i = 0; i < num_auxv; ++i) {
+              ssize_t nread;
+              auxv_t auxv;
+              NO_INTR(nread = sys_read(fd, &auxv, sizeof(auxv_t)));
+              if (nread != sizeof(auxv_t)) {
+                NO_INTR(sys_close(fd));
                 goto done;
               }
-              nhdr.n_namesz = 4;
+              if (writer(handle, &auxv, sizeof(auxv_t)) != sizeof(auxv_t)) {
+                NO_INTR(sys_close(fd));
+                goto done;
+              }
             }
-            #endif
+          }
+          /* The order of threads in the output matters to gdb:
+           * it assumes that the first one is the one that crashed.
+           * Make it easier for the end-user to find crashing thread
+           * by dumping it first.
+           */
+          for (i = num_threads; i-- > 0; ) {
+            if (pids[i] == main_pid) {
+              if (WriteThreadRegs(handle, writer, prstatus, pids[i],
+                                  regs+i, fpregs+i, fpxregs+i)) {
+                goto done;
+              }
+              break;
+            }
+          }
+          for (i = num_threads; i-- > 0; ) {
+            if (pids[i] != main_pid) {
+              if (WriteThreadRegs(handle, writer, prstatus, pids[i],
+                                  regs+i, fpregs+i, fpxregs+i)) {
+                goto done;
+              }
+            }
+          }
+
+          /* Write user provided notes                                       */
+          for (i = 0; i < extra_notes_count; i++) {
+            size_t name_align = 0, description_align = 0;
+            const char scratch[3] = {0,0,0};
+            nhdr.n_namesz = strlen(extra_notes[i].name)+1;
+            nhdr.n_descsz = extra_notes[i].description_size;
+            nhdr.n_type = extra_notes[i].type;
+            /* Get the alignment for the data                                */
+            if (nhdr.n_namesz % 4 != 0) {
+              name_align = 4 - nhdr.n_namesz % 4;
+            }
+            if (nhdr.n_descsz % 4 != 0) {
+              description_align = 4 - nhdr.n_descsz % 4;
+            }
+            /* Write the note header                                         */
+            if (writer(handle, &nhdr, sizeof(Nhdr)) != sizeof(Nhdr)) {
+              goto done;
+            }
+            /* Write the note name and padding                               */
+            if (writer(handle, extra_notes[i].name, nhdr.n_namesz)
+                  != nhdr.n_namesz) {
+              goto done;
+            }
+            if (writer(handle, scratch, name_align) != name_align) {
+              goto done;
+            }
+            /* Write the note description and padding                        */
+            if (writer(handle, extra_notes[i].description, nhdr.n_descsz)
+                  != nhdr.n_descsz) {
+              goto done;
+            }
+            if (writer(handle, scratch, description_align) !=
+                description_align) {
+              goto done;
+            }
           }
         }
 
@@ -874,14 +1201,27 @@ static int CreateElfCore(void *handle,
 
         /* Write all memory segments                                         */
         for (i = 0; i < num_mappings; i++) {
-          if (mappings[i].flags & (PF_ANONYMOUS|PF_W) &&
+          if (mappings[i].write_size > 0 &&
               writer(handle, (void *)mappings[i].start_address,
-                     mappings[i].end_address - mappings[i].start_address) !=
-                     mappings[i].end_address - mappings[i].start_address) {
+                     mappings[i].write_size) != mappings[i].write_size) {
             goto done;
           }
         }
-
+        if (vdso.address) {
+          /* Finally write the contents of Phdrs that "belong" to vdso.      */
+          Phdr *vdso_phdr = (Phdr*)(vdso.address + vdso.ehdr->e_phoff);
+          for (i = 0; i < vdso.ehdr->e_phnum; i++) {
+            Phdr *p = vdso_phdr+i;
+            if (p->p_type == PT_LOAD) {
+              /* This segment has already been dumped, because it is one of
+               * the mappings[].
+               */
+            } else if (writer(handle, (void*)p->p_vaddr, p->p_filesz) !=
+                       p->p_filesz) {
+              goto done;
+            }
+          }
+        }
         rc = 0;
       }
     }
@@ -1209,10 +1549,10 @@ static inline int GetParentRegs(void *frame, regs *cpu, fpregs *fp,
  */
 int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
                         va_list ap
-                     /* const char *file_name, size_t max_length,
-                        const char *PATH,
-                        const struct CoredumperCompressor *compressors,
-                        const struct CoredumperCompressor **selected_comp */) {
+                     /* const struct CoreDumpParameters *params,
+                        const char *file_name,
+                        const char *PATH
+                      */) {
   long             i;
   int              rc = -1, fd = -1, threads = num_threads, hasSSE = 1;
   struct core_user user, *puser = &user;
@@ -1324,7 +1664,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
     #endif
   }
 
-  /* Get parent's CPU registers, and user data structure                 */
+  /* Get parent's CPU registers, and user data structure                     */
   {
     #ifndef __mips__
     for (i = 0; i < sizeof(struct core_user)/sizeof(int); i++)
@@ -1440,16 +1780,25 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
     int pagesize = sys_sysconf(_SC_PAGESIZE);
     struct kernel_sigset_t old_signals, blocked_signals;
 
+    const struct CoreDumpParameters *params =
+      va_arg(ap, const struct CoreDumpParameters *);
     const char *file_name =
       va_arg(ap, const char *);
     size_t max_length =
-      va_arg(ap, size_t);
+      GetCoreDumpParameter(params, max_length);
     const char *PATH =
       va_arg(ap, const char *);
     const struct CoredumperCompressor *compressors =
-      va_arg(ap, const struct CoredumperCompressor *);
+      GetCoreDumpParameter(params, compressors);
     const struct CoredumperCompressor **selected_compressor =
-      va_arg(ap, const struct CoredumperCompressor **);
+      (const struct CoredumperCompressor **)GetCoreDumpParameter(
+          params, selected_compressor);
+    int prioritize =
+      GetCoreDumpParameter(params, flags) & COREDUMPER_FLAG_LIMITED_BY_PRIORITY;
+    const struct CoredumperNote *notes =
+      GetCoreDumpParameter(params, notes);
+    int note_count =
+      GetCoreDumpParameter(params, note_count);
 
     if (selected_compressor != NULL) {
       /* For now, assume that the core dump is uncompressed; we will later
@@ -1552,7 +1901,8 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
           
           CreateElfCore(&fds[1], SimpleWriter, SimpleDone, &prpsinfo, puser,
                         &prstatus, threads, pids, thread_regs, thread_fpregs,
-                        hasSSE ? thread_fpxregs : NULL, pagesize);
+                        hasSSE ? thread_fpxregs : NULL, pagesize, 0, main_pid,
+                        notes, note_count);
           NO_INTR(sys_close(fds[1]));
           sys__exit(0);
 
@@ -1651,11 +2001,20 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
           suffix = compressors->suffix;
         }
         /* scope */ {
+          const int kOpenFlags = O_WRONLY|O_CREAT|O_TRUNC;
           char extended_file_name[strlen(file_name) + strlen(suffix) + 1];
           strcat(strcpy(extended_file_name, file_name), suffix);
           NO_INTR(writer_fds.out_fd = sys_open(extended_file_name,
-                                               O_WRONLY|O_CREAT|O_TRUNC,
+                                               kOpenFlags|O_LARGEFILE,
                                                0600));
+          if (writer_fds.out_fd < 0 && EINVAL == errno && O_LARGEFILE) {
+            /* This kernel apears not to have large file support.
+             * Try again without O_LARGEFILE.
+             */
+            NO_INTR(writer_fds.out_fd = sys_open(extended_file_name,
+                                                 kOpenFlags,
+                                                 0600));
+          }
           if (writer_fds.out_fd < 0) {
             saved_errno = errno;
             if (fds[0] >= 0) NO_INTR(sys_close(fds[0]));
@@ -1689,7 +2048,8 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
         rc = CreateElfCore(&writer_fds, writer, PipeDone, &prpsinfo, puser,
                            &prstatus, threads, pids, thread_regs,
                            thread_fpregs, hasSSE ? thread_fpxregs : NULL,
-                           pagesize);
+                           pagesize, prioritize ? max_length : 0, main_pid,
+                           notes, note_count);
         if (fds[0] >= 0) {
           saved_errno = errno;
           /* Close the input side of the compression pipeline, and flush

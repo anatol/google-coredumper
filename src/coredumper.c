@@ -1,4 +1,4 @@
-/* Copyright (c) 2005-2007, Google Inc.
+/* Copyright (c) 2005-2008, Google Inc.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -28,7 +28,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  * ---
- * Author: Markus Gutschke
+ * Author: Markus Gutschke, Carl Crous
  *
  * Code to extract a core dump snapshot of the current process.
  */
@@ -116,6 +116,14 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *thread_pids,
 #endif
 
 
+/* Internal helper method used by GetCoreDump().
+ */
+static int GetCoreDumpFunction(void *frame,
+                               const struct CoreDumpParameters *params) {
+  return ListAllProcessThreads(frame, InternalGetCoreDump, params, NULL,
+                               getenv("PATH"));
+}
+
 /* Returns a file handle that can be read to obtain a snapshot of the
  * current state of this process. If a core file could not be
  * generated for any reason, -1 is returned.
@@ -132,9 +140,19 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *thread_pids,
  */
 int GetCoreDump(void) {
   FRAME(frame);
-  return ListAllProcessThreads(&frame, InternalGetCoreDump,
-                               (void *)0, (size_t)0,
-                               (void *)0, (void *)0, (void *)0);
+  struct CoreDumpParameters params;
+  ClearCoreDumpParameters(&params);
+  return GetCoreDumpFunction(&frame, &params);
+}
+
+int GetCoreDumpWith(const struct CoreDumpParameters *params) {
+  FRAME(frame);
+  if ((params->flags & COREDUMPER_FLAG_LIMITED) ||
+      (params->flags & COREDUMPER_FLAG_LIMITED_BY_PRIORITY)) {
+    errno = EINVAL;
+    return -1;
+  }
+  return GetCoreDumpFunction(&frame, params);
 }
 
 /* Attempts to compress the core file on the fly, if a suitable compressor
@@ -144,9 +162,10 @@ int GetCoreDump(void) {
 int GetCompressedCoreDump(const struct CoredumperCompressor compressors[],
                           struct CoredumperCompressor **selected_compressor) {
   FRAME(frame);
-  return ListAllProcessThreads(&frame, InternalGetCoreDump,
-                               (void *)0, (size_t)0,
-                               getenv("PATH"),compressors,selected_compressor);
+  struct CoreDumpParameters params;
+  ClearCoreDumpParameters(&params);
+  SetCoreDumpCompressed(&params, compressors, selected_compressor);
+  return GetCoreDumpFunction(&frame, &params);
 }
 
 /* Re-runs fn until it doesn't cause EINTR.
@@ -156,13 +175,11 @@ int GetCompressedCoreDump(const struct CoredumperCompressor compressors[],
 
 /* Internal helper method used by WriteCoreDump().
  */
-static int WriteCoreDumpFunction(void *frame, const char *file_name,
-                           size_t max_length,
-                           const struct CoredumperCompressor compressors[],
-                           struct CoredumperCompressor **selected_compressor) {
-  return ListAllProcessThreads(frame, InternalGetCoreDump,
-                               file_name, max_length, getenv("PATH"),
-                               compressors, selected_compressor);
+static int WriteCoreDumpFunction(void *frame,
+                                 const struct CoreDumpParameters *params,
+                                 const char *file_name) {
+  return ListAllProcessThreads(frame, InternalGetCoreDump, params, file_name,
+                               getenv("PATH"));
 }
 
 /* Writes the core file to disk. This is a convenience method wrapping
@@ -171,8 +188,15 @@ static int WriteCoreDumpFunction(void *frame, const char *file_name,
  */
 int WriteCoreDump(const char *file_name) {
   FRAME(frame);
-  return WriteCoreDumpFunction(&frame, file_name, SIZE_MAX,
-                               (void *)0, (void *)0);
+  struct CoreDumpParameters params;
+  ClearCoreDumpParameters(&params);
+  return WriteCoreDumpFunction(&frame, &params, file_name);
+}
+
+int WriteCoreDumpWith(const struct CoreDumpParameters *params,
+                      const char *file_name) {
+  FRAME(frame);
+  return WriteCoreDumpFunction(&frame, params, file_name);
 }
 
 /* Callers might need to restrict the maximum size of the core file. This
@@ -180,8 +204,23 @@ int WriteCoreDump(const char *file_name) {
  */
 int WriteCoreDumpLimited(const char *file_name, size_t max_length) {
   FRAME(frame);
-  return WriteCoreDumpFunction(&frame, file_name, max_length,
-                               (void *)0, (void *)0);
+  struct CoreDumpParameters params;
+  ClearCoreDumpParameters(&params);
+  SetCoreDumpLimited(&params, max_length);
+  return WriteCoreDumpFunction(&frame, &params, file_name);
+}
+
+/* This will limit the size of the core file by reducing or removing the
+ * largest memory segments first, effectively prioritizing the smaller memory
+ * segments. This behavior is preferred when the process has a large heap and
+ * you would like to preserve the relatively small stack.
+ */
+int WriteCoreDumpLimitedByPriority(const char *file_name, size_t max_length) {
+  FRAME(frame);
+  struct CoreDumpParameters params;
+  ClearCoreDumpParameters(&params);
+  SetCoreDumpLimitedByPriority(&params, max_length);
+  return WriteCoreDumpFunction(&frame, &params, file_name);
 }
 
 /* Attempts to compress the core file on the fly, if a suitable compressor
@@ -195,6 +234,60 @@ int WriteCompressedCoreDump(const char *file_name, size_t max_length,
                             const struct CoredumperCompressor compressors[],
                             struct CoredumperCompressor **selected_compressor){
   FRAME(frame);
-  return WriteCoreDumpFunction(&frame, file_name, max_length,
-                               compressors, selected_compressor);
+  struct CoreDumpParameters params;
+  ClearCoreDumpParameters(&params);
+  SetCoreDumpCompressed(&params, compressors, selected_compressor);
+  SetCoreDumpLimited(&params, max_length);
+  return WriteCoreDumpFunction(&frame, &params, file_name);
+}
+
+void ClearCoreDumpParametersInternal(struct CoreDumpParameters *params,
+                                     size_t size) {
+  memset(params, 0, size);
+  params->size = size;
+  SetCoreDumpParameter(params, max_length, SIZE_MAX);
+}
+
+int SetCoreDumpLimited(struct CoreDumpParameters *params, size_t max_length) {
+  if (params->flags & COREDUMPER_FLAG_LIMITED_BY_PRIORITY) {
+    errno = EINVAL;
+    return -1;
+  }
+  params->flags |= COREDUMPER_FLAG_LIMITED;
+  SetCoreDumpParameter(params, max_length, max_length);
+  return 0;
+}
+
+int SetCoreDumpCompressed(struct CoreDumpParameters *params,
+                          const struct CoredumperCompressor *compressors,
+                          struct CoredumperCompressor **selected_compressor) {
+  if (params->flags & COREDUMPER_FLAG_LIMITED_BY_PRIORITY) {
+    errno = EINVAL;
+    return -1;
+  }
+  SetCoreDumpParameter(params, compressors, compressors);
+  SetCoreDumpParameter(params, selected_compressor, selected_compressor);
+  return 0;
+}
+
+int SetCoreDumpLimitedByPriority(struct CoreDumpParameters *params,
+                                 size_t max_length) {
+  if (((params->flags & COREDUMPER_FLAG_LIMITED) &&
+      !(params->flags & COREDUMPER_FLAG_LIMITED_BY_PRIORITY)) ||
+      params->compressors != NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+  SetCoreDumpParameter(params, flags, params->flags |
+                       COREDUMPER_FLAG_LIMITED |
+                       COREDUMPER_FLAG_LIMITED_BY_PRIORITY);
+  SetCoreDumpParameter(params, max_length, max_length);
+  return 0;
+}
+
+int SetCoreDumpNotes(struct CoreDumpParameters *params,
+                     struct CoredumperNote *notes, int note_count) {
+  SetCoreDumpParameter(params, notes, notes);
+  SetCoreDumpParameter(params, note_count, note_count);
+  return 0;
 }

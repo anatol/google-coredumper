@@ -1,4 +1,4 @@
-/* Copyright (c) 2005-2007, Google Inc.
+/* Copyright (c) 2005-2008, Google Inc.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -28,7 +28,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  * ---
- * Author: Markus Gutschke
+ * Author: Markus Gutschke, Carl Crous
  *
  * Code to extract a core dump snapshot of the current process.
  */
@@ -45,9 +45,9 @@ extern "C" {
  * coredumps. There are a few predefined compressor descriptions; callers
  * can also define their own compressors.
  * All functions expect an array of compressors. Array entries will be tried
- * in sequence until an executable compressor has been found. An empty string
- * in place of the compressor name signals that no compression should be
- * performed.
+ * in sequence until an executable compressor has been found. An empty
+ * c-string in place of the compressor name signals that no compression should
+ * be performed.
  * The end of the array is signalled by an entry that is completely zero'd out.
  */
 struct CoredumperCompressor {
@@ -55,6 +55,51 @@ struct CoredumperCompressor {
   const char *const *args;/* execv()-style command line arguments            */
   const char *suffix;     /* Suffix that should be appended; e.g. .gz        */
 };
+
+/* Description of a elf note for use in the PT_NOTES section of the core file.
+ */
+struct CoredumperNote {
+  const char *name;               /* The vendor name                         */
+  unsigned int type;              /* A vendor specific type                  */
+  unsigned int description_size;  /* The size of the description field       */
+  const void *description;        /* The note data                           */
+};
+
+/* Parameters used to control the core dumper. Future versions of this
+ * structure must be backwards compatible so any new fields must be appended to
+ * the end.
+ */
+struct CoreDumpParameters {
+  /* The size of this structure. This is used to make sure future versions are
+   * backwards compatible.
+   */
+  size_t size;
+  /* Specific settings for the core dumper. See COREDUMPER_FLAG_*            */
+  int flags;
+  /* The maximum file size for the core dump.                                */
+  size_t max_length;
+  /* The set of compressors to choose from.                                  */
+  const struct CoredumperCompressor *compressors;
+  /* After dumping a compressed core, this will be set to the compressor which
+   * was used to compress the core file.
+   */
+  struct CoredumperCompressor **selected_compressor;
+  /* Extra notes to write to the core file notes section.                    */
+  const struct CoredumperNote *notes;
+  /* The amount of notes in the notes array.                                 */
+  int note_count;
+};
+
+/* The core file is limited in size and max_length denotes the maximum size. If
+ * the core file exceeds this maximum, the file will be truncated.
+ */
+#define COREDUMPER_FLAG_LIMITED 1
+
+/* The core file is limited in size and max_length denotes the maximum size. If
+ * the core file exceeds this maximum, the largest memory segments will be
+ * reduced or removed first in order to preserve the smaller ones.
+ */
+#define COREDUMPER_FLAG_LIMITED_BY_PRIORITY 2
 
 /* Try compressing with either bzip2, gzip, or compress. If all of those fail,
  * fall back on generating an uncompressed file.
@@ -98,6 +143,11 @@ extern const struct CoredumperCompressor COREDUMPER_UNCOMPRESSED[];
  */
 int GetCoreDump(void);
 
+/* Gets a core dump with the given parameters. This is not compatible with any
+ * core size limiting parameters.
+ */
+int GetCoreDumpWith(const struct CoreDumpParameters *params);
+
 /* Attempts to compress the core file on the fly, if a suitable compressor
  * could be located. Sets "selected_compressor" to the compressor that
  * was picked.
@@ -112,10 +162,22 @@ int GetCompressedCoreDump(const struct CoredumperCompressor compressors[],
  */
 int WriteCoreDump(const char *file_name);
 
+/* Writes a core dump to the given file with the given parameters.           */
+int WriteCoreDumpWith(const struct CoreDumpParameters *params,
+                      const char *file_name);
+
 /* Callers might need to restrict the maximum size of the core file. This
  * convenience method provides the necessary support to emulate "ulimit -c".
  */
 int WriteCoreDumpLimited(const char *file_name, size_t max_length);
+
+/* Writes a limited size core file, however instead of truncating the file at
+ * the limit, the core dumper will prioritize smaller memory segments. This
+ * means that a large heap will most likely either be only partially included
+ * or not included at all. If the max_length is set too small, this could cause
+ * performance issues.
+ */
+int WriteCoreDumpLimitedByPriority(const char *file_name, size_t max_length);
 
 /* Attempts to compress the core file on the fly, if a suitable compressor
  * could be located. Sets "selected_compressor" to the compressor that
@@ -127,6 +189,63 @@ int WriteCoreDumpLimited(const char *file_name, size_t max_length);
 int WriteCompressedCoreDump(const char *file_name, size_t max_length,
                             const struct CoredumperCompressor compressors[],
                             struct CoredumperCompressor **selected_compressor);
+
+
+/* A convenience definition to clear core dump parameters.
+ */
+#define ClearCoreDumpParameters(p)                                            \
+  ClearCoreDumpParametersInternal((p), sizeof(struct CoreDumpParameters))
+
+/* Checks if the current version of the coredumper has a specific parameter.
+ */
+#define CoreDumpParametersHas(p, f)                                           \
+  ((p)->size >= offsetof(struct CoreDumpParameters, f) + sizeof((p)->f))
+
+/* Sets a coredumper parameter to a given value. This will abort the program if
+ * the given parameter doesn't exist in the parameters.
+ */
+#define SetCoreDumpParameter(p, f, v)                                         \
+  do {                                                                        \
+    if (!CoreDumpParametersHas(p, f)) {                                       \
+      abort();                                                                \
+    }                                                                         \
+    (p)->f = (v);                                                             \
+  } while(0)
+
+/* Gets a coredumper parameter. If the parameter doesn't exist, 0 is returned.
+ */
+#define GetCoreDumpParameter(p, f)                                            \
+  (CoreDumpParametersHas(p, f) ? (p)->f : 0)
+
+/* Clears the given coredumper parameters to zero, sets the size parameter and
+ * the max_length parameter to SIZE_MAX.
+ */
+void ClearCoreDumpParametersInternal(struct CoreDumpParameters *params,
+                                     size_t size);
+
+/* Sets the coredumper parameters to provide a limited core dump. Returns
+ * zero on success otherwise -1 will be returned and errno will be set.
+ */
+int SetCoreDumpLimited(struct CoreDumpParameters *params, size_t max_length);
+
+/* Sets the coredumper parameters to provide a compressed core dump. Returns
+ * zero on success otherwise -1 will be returned and errno will be set.
+ */
+int SetCoreDumpCompressed(struct CoreDumpParameters *params,
+                          const struct CoredumperCompressor *compressors,
+                          struct CoredumperCompressor **selected_compressor);
+
+/* Sets the coredumper parameters to provide a prioritized limited core file.
+ * Returns zero on success otherwise -1 will be returned and errno will be set.
+ */
+int SetCoreDumpLimitedByPriority(struct CoreDumpParameters *params,
+                                 size_t max_length);
+
+/* Sets the coredumper parameters to add extra notes to the core file.
+ * Returns zero on success otherwise -1 will be returned and errno will be set.
+ */
+int SetCoreDumpNotes(struct CoreDumpParameters *params,
+                     struct CoredumperNote *notes, int note_count);
 
 #ifdef __cplusplus
 }
