@@ -32,6 +32,9 @@ The %name-devel package contains static and debug libraries and header
 files for developing applications that use the %name utility.
 
 %changelog
+    * Thu Mar  3 2008 <opensource@google.com>
+    - Updated for version 1.2
+
     * Thu Feb 15 2007 <opensource@google.com>
     - Added dependencies to devel RPMs
     - Added manual pages
@@ -61,8 +64,8 @@ rm -rf $RPM_BUILD_ROOT
 
 %doc AUTHORS COPYING ChangeLog INSTALL NEWS README TODO examples
 
-%{prefix}/lib/libcoredumper.so.0
-%{prefix}/lib/libcoredumper.so.0.0.0
+%{prefix}/lib/libcoredumper.so.1
+%{prefix}/lib/libcoredumper.so.1.0.0
 
 
 %files devel
@@ -72,8 +75,19 @@ rm -rf $RPM_BUILD_ROOT
 %{prefix}/lib/libcoredumper.a
 %{prefix}/lib/libcoredumper.la
 %{prefix}/lib/libcoredumper.so
+%{prefix}/man/man3/ClearCoreDumpParameters.3.gz
+%{prefix}/man/man3/CoreDumpParameters.3.gz
 %{prefix}/man/man3/GetCompressedCoreDump.3.gz
 %{prefix}/man/man3/GetCoreDump.3.gz
+%{prefix}/man/man3/GetCoreDumpWith.3.gz
+%{prefix}/man/man3/SetCoreDumpCompressed.3.gz
+%{prefix}/man/man3/SetCoreDumpLimited.3.gz
+%{prefix}/man/man3/SetCoreDumpLimitedByPriority.3.gz
+%{prefix}/man/man3/SetCoreDumpNotes.3.gz
 %{prefix}/man/man3/WriteCompressedCoreDump.3.gz
 %{prefix}/man/man3/WriteCoreDump.3.gz
 %{prefix}/man/man3/WriteCoreDumpLimited.3.gz
+%{prefix}/man/man3/WriteCoreDumpLimitedByPriority.3.gz
+%{prefix}/man/man3/WriteCoreDumpWith.3.gz
+%{prefix}/man/man3/WriteCoreDumpWith.3.gz
+

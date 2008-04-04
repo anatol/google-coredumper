@@ -88,3 +88,8 @@ Thu Apr  3 14:16:01 2008  Google Inc. <opensource@google.com>
 	* Made the failing thread's registers the first in the core file as
 	expected by gdb.
 
+Fri Apr  4 09:38:05 2008  Google Inc. <opensource@google.com>
+
+	* coredumper: version 1.2.1 release
+	* Fixed a problem which occurs if auxv vectors aren't supported.
+
