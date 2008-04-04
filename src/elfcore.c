@@ -345,7 +345,7 @@ static ssize_t c_write(int f, const void *void_buf, size_t bytes, int *errno_){
       #define SYS_PREFIX 0
       #include "linux_syscall_support.h"
     #endif
-  
+
     const unsigned char *buf = (const unsigned char*)void_buf;
     size_t len = bytes;
     while (len > 0) {
@@ -428,7 +428,7 @@ static ssize_t PipeWriter(void *f, const void *void_buf, size_t bytes) {
     struct kernel_pollfd pfd[2]   = { { fds->compressed_fd, POLLIN, 0 },
                                       { fds->write_fd, POLLOUT, 0 } };
     int nfds = sys_poll(pfd, 2, -1);
-    
+
     if (nfds < 0) {
       /* Abort on fatal unexpected I/O errors.                               */
       break;
@@ -605,7 +605,7 @@ static inline int sex() {
 
 static int WriteThreadRegs(void *handle,
                            ssize_t (*writer)(void *, const void *, size_t),
-                           prstatus *prstatus, pid_t pid, 
+                           prstatus *prstatus, pid_t pid,
                            regs *regs, fpregs *fpregs, fpxregs *fpxregs) {
   Nhdr nhdr;
   memset(&nhdr, 0, sizeof(Nhdr));
@@ -621,7 +621,7 @@ static int WriteThreadRegs(void *handle,
       sizeof(struct prstatus)) {
     return -1;
   }
-  
+
   /* FPU registers                                                           */
   nhdr.n_descsz = sizeof(struct fpregs);
   nhdr.n_type   = NT_FPREGSET;
@@ -631,7 +631,7 @@ static int WriteThreadRegs(void *handle,
       sizeof(struct fpregs)) {
     return -1;
   }
-  
+
   /* SSE registers                                                           */
   #if defined(__i386__) && !defined( __x86_64__)
   /* Linux on x86-64 stores all FPU registers in the SSE structure           */
@@ -939,7 +939,7 @@ static int CreateElfCore(void *handle,
         /* Write program headers, starting with the PT_NOTE entry            */
         /* scope */ {
           Phdr   phdr;
-          size_t offset   = sizeof(Ehdr) + 
+          size_t offset   = sizeof(Ehdr) +
                             (num_mappings + num_extra_phdrs + 1)*sizeof(Phdr);
           size_t filesz   = sizeof(Nhdr) + 8 + sizeof(struct prpsinfo) +
                     (user ? sizeof(Nhdr) + 8 + sizeof(struct core_user) : 0) +
@@ -967,7 +967,9 @@ static int CreateElfCore(void *handle,
             }
           }
           /* Space for auxv note                                             */
-          filesz += 8 + sizeof(Nhdr) + num_auxv*sizeof(auxv_t);
+          if (num_auxv) {
+            filesz += 8 + sizeof(Nhdr) + num_auxv*sizeof(auxv_t);
+          }
 
           memset(&phdr, 0, sizeof(Phdr));
           phdr.p_type     = PT_NOTE;
@@ -1270,10 +1272,10 @@ static int CreatePipelineChild(void *void_arg) {
       #undef  SYS_LINUX_SYSCALL_SUPPORT_H
       #include "linux_syscall_support.h"
     #endif
-  
+
     struct CreateArgs *args = (struct CreateArgs *)void_arg;
     int i;
-    
+
     /* Use pipe to tell parent about the compressor that we chose.
      * Make sure the file handle for the write-end of the pipe is
      * bigger than 2, so that it does not interfere with the
@@ -1284,7 +1286,7 @@ static int CreatePipelineChild(void *void_arg) {
       MY_NO_INTR(args->fds[1] = sys0_dup(args->fds[1]));
     }
     sys0_fcntl(args->fds[1], F_SETFD, FD_CLOEXEC);
-    
+
     /* Move the filehandles for stdin/stdout/stderr, so that they
      * map to handles 0-2. stdin/stdout are connected to pipes, and
      * stderr points to "/dev/null".
@@ -1299,7 +1301,7 @@ static int CreatePipelineChild(void *void_arg) {
     MY_NO_INTR(sys0_dup2(args->zip_out[1], 1));
     MY_NO_INTR(sys0_close(2));
     MY_NO_INTR(sys0_dup2(sys0_open("/dev/null", O_WRONLY, 0), 2));
-  
+
     /* Close all handles other than stdin/stdout/stderr and the
      * pipe to the parent. This also takes care of all the filehandles
      * that we temporarily created by calling sys_dup().
@@ -1307,14 +1309,14 @@ static int CreatePipelineChild(void *void_arg) {
     for (i = 3; i < args->openmax; i++)
       if (i != args->fds[1])
         MY_NO_INTR(sys0_close(i));
-  
+
     while (args->compressors->compressor != NULL &&
            *args->compressors->compressor) {
       extern char **environ;
-      
+
       const char        *compressor = args->compressors->compressor;
       const char *const *cmd_args   = args->compressors->args;
-      
+
       /* Try next compressor description. If the compressor exists,
        * the fds[1] file handle will get closed on exec(). The
        * parent detects this, and eventually updates
@@ -1355,7 +1357,7 @@ static int CreatePipelineChild(void *void_arg) {
       }
       ++args->compressors;
     }
-  
+
     /* No suitable compressor found. Tell parent about it.                   */
     c_write(args->fds[1], &args->compressors, sizeof(&args->compressors),
             &ERRNO);
@@ -1436,7 +1438,7 @@ static int CreatePipeline(int *fds, int openmax, const char *PATH,
     while (c_read(fds[0], compressors, sizeof(*compressors), &errno)) {
     }
     NO_INTR(sys_close(fds[0]));
-    
+
     /* Fail if either the child never even executed (unlikely), or
      * did not find any compressor that could be executed.
      */
@@ -1453,7 +1455,7 @@ static int CreatePipeline(int *fds, int openmax, const char *PATH,
         return -1;
       }
     }
-    
+
     if (*(*compressors)->compressor) {
       /* Found a good compressor program, which is now connected to
        * zip_in/zip_out.
@@ -1834,14 +1836,14 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
          */
         sys_sigfillset(&blocked_signals);
         sys_sigprocmask(SIG_BLOCK, &blocked_signals, &old_signals);
-        
+
         /* Create a new core dump in child process; call sys_fork() in order to
          * avoid complications with pthread_atfork() handlers. In the child
          * process, we should only ever call system calls.
          */
         if ((rc = sys_fork()) == 0) {
           int  fds[2];
-          
+
           /* Create a pipe for communicating between processes. If
            * necessary, add a compressor to the pipeline.
            */
@@ -1849,7 +1851,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
               (fds[0] < 0 && sys_pipe(fds) < 0)) {
             sys__exit(1);
           }
-        
+
           /* Pass file handle to parent                                      */
           /* scope */ {
             char cmsg_buf[CMSG_SPACE(sizeof(int))];
@@ -1882,13 +1884,13 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
                 sys__exit(1);
             }
           }
-          
+
           /* Close all file handles other than the write end of our pipe     */
           for (i = 0; i < openmax; i++) {
             if (i != fds[1]) {
               NO_INTR(sys_close(i)); }
           }
-          
+
           /* If compiled without threading support, this is the only
            * place where we can request the parent's CPU
            * registers. This function is a no-op when threading
@@ -1898,7 +1900,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
                              thread_fpxregs, &hasSSE)) {
             sys__exit(1);
           }
-          
+
           CreateElfCore(&fds[1], SimpleWriter, SimpleDone, &prpsinfo, puser,
                         &prstatus, threads, pids, thread_regs, thread_fpregs,
                         hasSSE ? thread_fpxregs : NULL, pagesize, 0, main_pid,
@@ -1918,7 +1920,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
         /* In the parent                                                     */
         sys_sigprocmask(SIG_SETMASK, &old_signals, (struct kernel_sigset_t*)0);
         NO_INTR(sys_close(pair[1]));
-        
+
         /* Get pipe file handle from child                                   */
         /* scope */ {
           const struct CoredumperCompressor *buffer[1];
@@ -1978,7 +1980,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
                          thread_fpxregs, &hasSSE)) {
         goto error;
       }
-      
+
       /* Create a pipe for communicating between processes. If
        * necessary, add a compressor to the pipeline.
        */
@@ -2023,7 +2025,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
             goto error;
           }
         }
-        
+
         /* Set up a suitable writer funtion.                                 */
         writer_fds.max_length = max_length;
         if (fds[0] >= 0) {
@@ -2044,7 +2046,7 @@ int InternalGetCoreDump(void *frame, int num_threads, pid_t *pids,
            */
           writer                   = LimitWriter;
         }
-        
+
         rc = CreateElfCore(&writer_fds, writer, PipeDone, &prpsinfo, puser,
                            &prstatus, threads, pids, thread_regs,
                            thread_fpregs, hasSSE ? thread_fpxregs : NULL,
