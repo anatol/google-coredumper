@@ -62,7 +62,6 @@ namespace linux_syscall_support {
 #include <asm/posix_types.h>
 #include <asm/types.h>
 #include <errno.h>
-#include <linux/dirent.h>
 #include <linux/types.h>
 #include <linux/unistd.h>
 #include <signal.h>
@@ -91,8 +90,6 @@ static void CheckStructures() {
   // there are a small number of data structures (e.g "struct
   // kernel_old_sigaction") that we cannot test at all, as glibc does
   // not have any definitions for them.
-  CHECK(sizeof(struct dirent64)  == sizeof(struct kernel_dirent64));
-  CHECK(sizeof(struct dirent)    == sizeof(struct kernel_dirent));
   CHECK(sizeof(struct iovec)     == sizeof(struct kernel_iovec));
   CHECK(sizeof(struct msghdr)    == sizeof(struct kernel_msghdr));
   CHECK(sizeof(struct pollfd)    == sizeof(struct kernel_pollfd));
