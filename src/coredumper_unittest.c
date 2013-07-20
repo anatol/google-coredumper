@@ -139,7 +139,7 @@ static void CheckWithReadElf(FILE *input, FILE *output, const char *filename,
                                "Core file", "no sections in this file",
                                "NOTE",
                                "no relocations in this file",
-                               "no unwind sections in this file",
+                               "The decoding of unwind sections for machine type Advanced Micro Devices X86-64 is not currently supported.",
                                "No version information found in this file",
                                "NT_PRPSINFO",
 #ifndef __mips__
