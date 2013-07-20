@@ -40,6 +40,7 @@ extern "C" {
 #include <elf.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <linux/sched.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdint.h>
