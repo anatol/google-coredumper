@@ -1196,8 +1196,8 @@ static int CreateElfCore(void *handle,
         /* Align all following segments to multiples of page size            */
         if (note_align) {
           char scratch[note_align];
-          memset(scratch, 0, sizeof(scratch));
-          if (writer(handle, scratch, sizeof(scratch)) != sizeof(scratch)) {
+          memset(scratch, 0, note_align*sizeof(char));
+          if (writer(handle, scratch, note_align*sizeof(char)) != note_align*sizeof(char)) {
             goto done;
           }
         }
